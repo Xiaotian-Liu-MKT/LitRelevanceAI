@@ -4,6 +4,7 @@ import os
 import time
 from datetime import datetime
 from typing import Dict, List
+from tqdm import tqdm
 
 import pandas as pd
 from openai import OpenAI
@@ -14,7 +15,7 @@ import google.generativeai as genai
 # 设置默认的配置
 DEFAULT_API_KEY = ""  # 替换成您的 API key，现在支持 OpenAI 和 Gemini
 DEFAULT_MODEL_OPENAI = "gpt-4o"  # 设置默认使用的 OpenAI 模型
-DEFAULT_MODEL_GEMINI = "Gemini 2.0 Flash"  # 设置默认使用的 Gemini 模型
+DEFAULT_MODEL_GEMINI = "gemini-2.0-flash"  # 设置默认使用的 Gemini 模型
 DEFAULT_TEMPERATURE = 0.3  # 设置默认的temperature值
 DEFAULT_API_TYPE = "gemini" # 默认 API 类型设置为 openai，用户可以选择 "gemini"
 
@@ -29,6 +30,34 @@ class LiteratureAnalyzer:
             self.client = genai.GenerativeModel(DEFAULT_MODEL_GEMINI)
         else:
             raise ValueError("不支持的 API 类型，目前仅支持 'openai' 或 'gemini'")
+
+    def read_scopus_csv(self, file_path: str) -> pd.DataFrame:
+        """读取Scopus导出的CSV文件"""
+        try:
+            df = pd.read_csv(file_path, encoding='utf-8-sig')
+            # 确保必要的列存在
+            required_columns = ['文献标题', '摘要']
+            for col in required_columns:
+                if col not in df.columns:
+                    # 尝试寻找可能的替代列名
+                    if col == '文献标题' and 'Title' in df.columns:
+                        df['文献标题'] = df['Title']
+                    elif col == '摘要' and 'Abstract' in df.columns:
+                        df['摘要'] = df['Abstract']
+                    else:
+                        raise ValueError(f"CSV文件中缺少必要的列: {col}")
+
+            # 添加分析结果的列
+            if '相关性得分' not in df.columns:
+                df['相关性得分'] = None
+            if '分析结果' not in df.columns:
+                df['分析结果'] = None
+            if '文献综述建议' not in df.columns:
+                df['文献综述建议'] = None
+
+            return df
+        except Exception as e:
+            raise Exception(f"读取CSV文件失败: {str(e)}")
 
     def analyze_paper(self, title: str, abstract: str) -> Dict:
         """分析单篇文献与研究课题的相关性"""
@@ -82,7 +111,7 @@ class LiteratureAnalyzer:
         total = len(df)
 
         try:
-            for idx, row in df.iterrows():
+            for idx, row in tqdm(df.iterrows(), total=len(df), desc="正在分析文献"):
                 print(f"\n正在分析第 {idx + 1}/{total} 篇文献...")
                 print(f"标题: {row['文献标题']}")
 
