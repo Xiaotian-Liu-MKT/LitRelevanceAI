@@ -8,34 +8,27 @@ from typing import Dict, List
 import pandas as pd
 from openai import OpenAI
 
+# 新增导入 Gemini API 库
+import google.generativeai as genai
+
 # 设置默认的配置
-DEFAULT_API_KEY = "在这里输入你的API key；暂时仅支持openAI"  # 替换成您的 API key
-DEFAULT_MODEL = "gpt-4o-mini"  # 设置默认使用的模型
+DEFAULT_API_KEY = ""  # 替换成您的 API key，现在支持 OpenAI 和 Gemini
+DEFAULT_MODEL_OPENAI = "gpt-4o"  # 设置默认使用的 OpenAI 模型
+DEFAULT_MODEL_GEMINI = "Gemini 2.0 Flash"  # 设置默认使用的 Gemini 模型
 DEFAULT_TEMPERATURE = 0.3  # 设置默认的temperature值
+DEFAULT_API_TYPE = "gemini" # 默认 API 类型设置为 openai，用户可以选择 "gemini"
 
 class LiteratureAnalyzer:
-    def __init__(self, api_key: str, research_topic: str):
+    def __init__(self, api_key: str, research_topic: str, api_type: str = DEFAULT_API_TYPE):
         self.research_topic = research_topic
-        self.client = OpenAI(api_key=api_key)
-
-    def read_scopus_csv(self, file_path: str) -> pd.DataFrame:
-        """读取Scopus导出的CSV文件"""
-        try:
-            abs_path = os.path.abspath(file_path)
-            print(f"正在读取文件: {abs_path}")
-
-            if not os.path.exists(abs_path):
-                raise FileNotFoundError(f"找不到文件: {abs_path}")
-
-            df = pd.read_csv(abs_path, encoding='utf-8')
-            # 添加新列用于存储分析结果
-            df['相关性得分'] = None
-            df['分析结果'] = None
-            df['文献综述建议'] = None
-            return df
-        except Exception as e:
-            print(f"读取CSV文件时出错: {str(e)}")
-            raise
+        self.api_type = api_type
+        if api_type == "openai":
+            self.client = OpenAI(api_key=api_key)
+        elif api_type == "gemini":
+            genai.configure(api_key=api_key)
+            self.client = genai.GenerativeModel(DEFAULT_MODEL_GEMINI)
+        else:
+            raise ValueError("不支持的 API 类型，目前仅支持 'openai' 或 'gemini'")
 
     def analyze_paper(self, title: str, abstract: str) -> Dict:
         """分析单篇文献与研究课题的相关性"""
@@ -57,15 +50,31 @@ class LiteratureAnalyzer:
 }}"""
 
         try:
-            response = self.client.chat.completions.create(
-                model=DEFAULT_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=DEFAULT_TEMPERATURE
-            )
-            return json.loads(response.choices[0].message.content)
+            if self.api_type == "openai":
+                response = self.client.chat.completions.create(
+                    model=DEFAULT_MODEL_OPENAI,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=DEFAULT_TEMPERATURE
+                )
+                return json.loads(response.choices[0].message.content)
+            else:  # gemini
+                response = self.client.generate_content(prompt)
+                # 修复 Gemini 响应解析
+                try:
+                    # 尝试直接解析响应文本
+                    return json.loads(response.text)
+                except (json.JSONDecodeError, AttributeError):
+                    # 如果失败，尝试从 response 对象获取内容
+                    try:
+                        if hasattr(response, 'candidates') and response.candidates:
+                            return json.loads(response.candidates[0].content.parts[0].text)
+                        else:
+                            return {"relevance_score": 0, "analysis": "无法解析 Gemini API 响应"}
+                    except Exception:
+                        return {"relevance_score": 0, "analysis": "无法解析 Gemini API 响应"}
         except Exception as e:
             print(f"API调用出错: {str(e)}")
-            return {"relevance_score": 0, "analysis": f"分析出错: {str(e)}"}
+            return {"relevance_score": 0, "analysis": f"分析出错: {str(e)}", "literature_review_suggestion": ""}
 
     def batch_analyze(self, df: pd.DataFrame, original_file_path: str) -> List[Dict]:
         """批量分析多篇文献"""
@@ -122,6 +131,17 @@ def get_user_input():
     """获取用户输入的配置信息"""
     print("欢迎使用文献相关性分析工具!\n")
 
+    # 选择 API 类型
+    while True:
+        api_type = input("请选择要使用的 API 类型 (1: OpenAI, 2: Gemini): ").strip()
+        if api_type == "1":
+            api_type = "openai"
+            break
+        elif api_type == "2":
+            api_type = "gemini"
+            break
+        print("无效的选择，请输入 1 或 2")
+
     # 使用默认API密钥
     print(f"使用默认API密钥")
     api_key = DEFAULT_API_KEY
@@ -150,16 +170,16 @@ def get_user_input():
             print("3. 如果路径包含空格，请用引号括起来")
             print("提示：可以直接将文件拖拽到终端窗口中\n")
 
-    return api_key, research_topic, abs_path
+    return api_key, research_topic, abs_path, api_type
 
 
 def main():
     try:
         # 获取用户输入
-        api_key, research_topic, file_path = get_user_input()
+        api_key, research_topic, file_path, api_type = get_user_input()
 
         print("\n正在初始化分析器...")
-        analyzer = LiteratureAnalyzer(api_key, research_topic)
+        analyzer = LiteratureAnalyzer(api_key, research_topic, api_type)
 
         print("正在读取文献数据...")
         df = analyzer.read_scopus_csv(file_path)
