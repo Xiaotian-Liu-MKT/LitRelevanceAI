@@ -13,7 +13,7 @@ from openai import OpenAI
 import google.generativeai as genai
 
 # 设置默认的配置
-DEFAULT_API_KEY = "AIzaSyCfsXwLf-erwzlibuZ278LoJ_uIK5I-AFg"  # 替换成您的 API key，现在支持 OpenAI 和 Gemini
+DEFAULT_API_KEY = ""  # 替换成您的 API key，现在支持 OpenAI 和 Gemini
 DEFAULT_MODEL_OPENAI = "gpt-4o"  # 设置默认使用的 OpenAI 模型
 DEFAULT_MODEL_GEMINI = "gemini-2.0-flash"  # 设置默认使用的 Gemini 模型
 DEFAULT_TEMPERATURE = 0.3  # 设置默认的temperature值
