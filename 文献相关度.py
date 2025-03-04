@@ -13,11 +13,11 @@ from openai import OpenAI
 import google.generativeai as genai
 
 # 设置默认的配置
-DEFAULT_API_KEY = ""  # 替换成您的 API key，现在支持 OpenAI 和 Gemini
+DEFAULT_API_KEY = "AIzaSyCfsXwLf-erwzlibuZ278LoJ_uIK5I-AFg"  # 替换成您的 API key，现在支持 OpenAI 和 Gemini
 DEFAULT_MODEL_OPENAI = "gpt-4o"  # 设置默认使用的 OpenAI 模型
 DEFAULT_MODEL_GEMINI = "gemini-2.0-flash"  # 设置默认使用的 Gemini 模型
 DEFAULT_TEMPERATURE = 0.3  # 设置默认的temperature值
-DEFAULT_API_TYPE = "gemini" # 默认 API 类型设置为 openai，用户可以选择 "gemini"
+DEFAULT_API_TYPE = "gemini" # 默认 API 类型设置为 gemini
 
 class LiteratureAnalyzer:
     def __init__(self, api_key: str, research_topic: str, api_type: str = DEFAULT_API_TYPE):
@@ -87,20 +87,94 @@ class LiteratureAnalyzer:
                 )
                 return json.loads(response.choices[0].message.content)
             else:  # gemini
-                response = self.client.generate_content(prompt)
-                # 修复 Gemini 响应解析
+                # 添加安全提示以确保输出JSON格式
+                formatted_prompt = prompt + "\n请确保返回有效的JSON格式，不要包含任何额外的文本、代码块标记或解释。"
+                
+                # 设置生成参数，明确要求结构化输出
+                generation_config = {
+                    "temperature": DEFAULT_TEMPERATURE,
+                    "top_p": 0.95,
+                    "top_k": 0,
+                    "max_output_tokens": 2048,
+                }
+                
+                safety_settings = [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                ]
+                
+                # 创建具有特定配置的模型
+                model = genai.GenerativeModel(
+                    model_name=DEFAULT_MODEL_GEMINI,
+                    generation_config=generation_config,
+                    safety_settings=safety_settings
+                )
+                
+                response = model.generate_content(formatted_prompt)
+                
+                # 更健壮的响应解析
+                response_text = ""
                 try:
-                    # 尝试直接解析响应文本
-                    return json.loads(response.text)
-                except (json.JSONDecodeError, AttributeError):
-                    # 如果失败，尝试从 response 对象获取内容
+                    # 尝试从响应对象获取文本
+                    if hasattr(response, 'text'):
+                        response_text = response.text
+                    elif hasattr(response, 'parts'):
+                        response_text = response.parts[0].text
+                    elif hasattr(response, 'candidates') and response.candidates:
+                        for candidate in response.candidates:
+                            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                                for part in candidate.content.parts:
+                                    if hasattr(part, 'text'):
+                                        response_text = part.text
+                                        break
+                                if response_text:
+                                    break
+                    
+                    # 清理响应文本，去除可能的代码块标记
+                    response_text = response_text.strip()
+                    if response_text.startswith("```json"):
+                        response_text = response_text[7:]
+                    if response_text.startswith("```"):
+                        response_text = response_text[3:]
+                    if response_text.endswith("```"):
+                        response_text = response_text[:-3]
+                    
+                    response_text = response_text.strip()
+                    
+                    # 尝试解析JSON
+                    return json.loads(response_text)
+                    
+                except (json.JSONDecodeError, AttributeError, IndexError) as e:
+                    print(f"解析Gemini响应时出错: {str(e)}")
+                    print(f"收到的原始响应: {response}")
+                    print(f"提取的文本: {response_text}")
+                    
+                    # 如果无法解析JSON，尝试使用正则表达式提取关键信息
+                    import re
                     try:
-                        if hasattr(response, 'candidates') and response.candidates:
-                            return json.loads(response.candidates[0].content.parts[0].text)
-                        else:
-                            return {"relevance_score": 0, "analysis": "无法解析 Gemini API 响应"}
+                        relevance_score_match = re.search(r'"relevance_score"\s*:\s*(\d+)', response_text)
+                        relevance_score = int(relevance_score_match.group(1)) if relevance_score_match else 0
+                        
+                        analysis_match = re.search(r'"analysis"\s*:\s*"([^"]*)"', response_text)
+                        analysis = analysis_match.group(1) if analysis_match else "无法从响应中提取分析结果"
+                        
+                        lit_review_match = re.search(r'"literature_review_suggestion"\s*:\s*"([^"]*)"', response_text)
+                        lit_review = lit_review_match.group(1) if lit_review_match else ""
+                        
+                        return {
+                            "relevance_score": relevance_score,
+                            "analysis": analysis,
+                            "literature_review_suggestion": lit_review
+                        }
                     except Exception:
-                        return {"relevance_score": 0, "analysis": "无法解析 Gemini API 响应"}
+                        # 如果所有尝试都失败，返回一个基本的响应
+                        return {
+                            "relevance_score": 0,
+                            "analysis": f"无法解析Gemini响应。原始响应: {response_text[:200]}...",
+                            "literature_review_suggestion": ""
+                        }
         except Exception as e:
             print(f"API调用出错: {str(e)}")
             return {"relevance_score": 0, "analysis": f"分析出错: {str(e)}", "literature_review_suggestion": ""}
@@ -131,6 +205,9 @@ class LiteratureAnalyzer:
                 df.at[idx, '分析结果'] = result['analysis']
                 df.at[idx, '文献综述建议'] = result.get('literature_review_suggestion', '')
 
+                # 保存每次分析结果后的状态
+                self.save_results(df, original_file_path, is_interim=True)
+                
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\n程序被用户中断。正在保存已完成的分析结果...")
@@ -140,18 +217,26 @@ class LiteratureAnalyzer:
 
         return results
 
-    def save_results(self, df: pd.DataFrame, original_file_path: str):
-        """保存分析结果到原CSV文件"""
+    def save_results(self, df: pd.DataFrame, original_file_path: str, is_interim=False):
+        """保存分析结果到CSV文件"""
         try:
             # 生成新的文件名
             file_dir = os.path.dirname(original_file_path)
             file_name = os.path.splitext(os.path.basename(original_file_path))[0]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            new_file_path = os.path.join(file_dir, f"{file_name}_analyzed_{timestamp}.csv")
+            
+            if is_interim:
+                # 临时保存用于中间状态，使用固定名称覆盖
+                new_file_path = os.path.join(file_dir, f"{file_name}_analyzed_interim.csv")
+            else:
+                # 最终保存，使用时间戳
+                new_file_path = os.path.join(file_dir, f"{file_name}_analyzed_{timestamp}.csv")
 
             # 保存到新的CSV文件
             df.to_csv(new_file_path, index=False, encoding='utf-8-sig')
-            print(f"\n分析结果已保存到: {os.path.abspath(new_file_path)}")
+            
+            if not is_interim:
+                print(f"\n分析结果已保存到: {os.path.abspath(new_file_path)}")
         except Exception as e:
             print(f"保存结果时出错: {str(e)}")
 
