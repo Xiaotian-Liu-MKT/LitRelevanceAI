@@ -1,3 +1,6 @@
+# Usage suggestions
+I personally feel that the most appropriate usage method is to use a relatively broad search strategy when searching in Scopus, but to provide as detailed a theoretical model description as possible when presenting research topics.
+
 # LitRelevanceAI
 
 An easy-to-use tool that automatically analyzes the relevance of academic papers to your research topic. LitRelevanceAI processes Scopus CSV exports using AI models to help you quickly identify which papers are most relevant to your research.
