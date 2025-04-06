@@ -14,7 +14,7 @@ import google.generativeai as genai
 
 # Set default configurations
 DEFAULT_API_KEY = ""  # Replace with your API key, now supports OpenAI and Gemini
-DEFAULT_MODEL_OPENAI = "gpt-4o-mini"  # Set the default OpenAI model
+DEFAULT_MODEL_OPENAI = "gpt-4o-mini"  # Or "gpt-4"; For unknown reasons, "gpt-4o" doesn't work here.
 DEFAULT_MODEL_GEMINI = "gemini-2.0-flash"  # Set the default Gemini model
 DEFAULT_TEMPERATURE = 0.3  # Set the default temperature value
 DEFAULT_API_TYPE = "gemini" # Default API type set to gemini
