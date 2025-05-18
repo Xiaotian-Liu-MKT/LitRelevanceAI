@@ -17,11 +17,11 @@ DEFAULT_CONFIG = {
     'GEMINI_MODEL_NAME': 'gemini-1.5-pro-latest',
     
     # 研究配置 (这些可以考虑从用户输入或单独的配置文件读取)
-    'RESEARCH_QUESTION': 'The influence of natural (vs. artificial) sweeteners in food/drink on consumers\' purchase intention',
+    'RESEARCH_QUESTION': '请在此处定义您的核心研究问题或理论模型。',
     'CRITERIA': [
-        '筛选条件1：文献是否关注食物/饮料',
-        '筛选条件2：文献是否关注消费者的行为、态度或偏好',
-        '筛选条件3：文献的结论是否涉及到perceived naturalness',
+        '筛选条件1：',
+        '筛选条件2：',
+        '筛选条件3：',
     ],
 
     # 通用细化分析问题配置
