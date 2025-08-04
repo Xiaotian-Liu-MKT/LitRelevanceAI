@@ -4,7 +4,6 @@ import os
 import time
 from datetime import datetime
 from typing import Dict, List
-from tqdm import tqdm
 
 import pandas as pd
 from openai import OpenAI
@@ -190,8 +189,8 @@ Please return in the following JSON format:
         total = len(df)
 
         try:
-            for idx, row in tqdm(df.iterrows(), total=len(df), desc="Analyzing papers"):
-                print(f"\nAnalyzing paper {idx + 1}/{total}...")
+            for i, (idx, row) in enumerate(df.iterrows(), start=1):
+                print(f"\nAnalyzing paper {i}/{total}...")
                 print(f"Title: {row['Title']}")
 
                 if pd.isna(row['Title']) or pd.isna(row['Abstract']):
