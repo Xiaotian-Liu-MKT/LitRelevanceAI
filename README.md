@@ -49,10 +49,10 @@ An easy-to-use tool that automatically analyzes the relevance of academic papers
    ```
 
 3. **Add your API key**:
-   - Open `LitRelevance.py` in any text editor (like Notepad, TextEdit, or VS Code)
-   - Find this line near the top: `DEFAULT_API_KEY = ""` 
-   - Put your API key between the quotes: `DEFAULT_API_KEY = "your-api-key-here"`
-   - Save the file
+   - Copy `.env.example` to `.env`
+   - Fill in your OpenAI or Gemini API keys
+   - Scripts such as `abstractScreener` will automatically read these values
+   - For `LitRelevance.py`, you can alternatively set `DEFAULT_API_KEY` directly in the file
 
 ## How to Use the Tool
 
