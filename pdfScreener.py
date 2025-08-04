@@ -1,401 +1,346 @@
-import pandas as pd
+"""AI-assisted PDF screening tool.
+
+This module mirrors the structure of ``abstractScreener.py`` but operates on
+PDF files.  It uses LiteLLM so that either OpenAI-, Gemini-, or locally hosted
+OpenAI-compatible APIs can be used transparently.  A folder of PDFs can be
+screened against user-defined criteria and optional detailed-analysis
+questions.  When a metadata file is supplied, the script will attempt to match
+PDFs to their metadata rows via identifiers such as DOI or Title and output a
+mapping table for later reuse.
+
+The script reads configuration from ``DEFAULT_CONFIG`` which can be overridden
+by providing a JSON configuration file or command line arguments.  Environment
+variables may be supplied in a ``.env`` file similar to ``abstractScreener``.
+
+Example usage::
+
+    python pdfScreener.py --pdf-folder ./papers --metadata-file meta.xlsx
+
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import mimetypes
 import os
-
-import google.generativeai as genai # Gemini SDK
-from google.generativeai.types import HarmCategory, HarmBlockThreshold # For safety settings
-import openpyxl
+import sys
 import time
-import json # 用于解析JSON响应
-import sys # 用于退出脚本
+from pathlib import Path
+from typing import Dict, List, Optional
 
-import mimetypes # To help guess MIME type for Gemini
+import openpyxl  # noqa: F401  # needed for pandas Excel writer
+import pandas as pd
+from litellm import completion
+from tqdm import tqdm
 
-# 配置部分
-DEFAULT_CONFIG = {
-    # AI服务配置
-    'AI_SERVICE': 'openai',
-    'GEMINI_API_KEY': '',  # Gemini API密钥
-    'GEMINI_MODEL_NAME': 'gemini-2.0-flash',
-    
-    # 研究配置
-    'RESEARCH_QUESTION': 'research regarding awe and meaning in life',
-    'CRITERIA': [
-        '筛选条件1：文献是否做了field study',
-    ],
 
-    # 通用细化分析问题配置
-    'DETAILED_ANALYSIS_QUESTIONS': [
-        {
-            'prompt_key': 'q1_number_of_experiments',
-            'question_text': '这篇文献做了几个实验。只要给我数字就行。',
-            'df_column_name': 'AI_实验数量'
-        },
-        {
-            'prompt_key': 'q2_number_of_samples ',
-            'question_text': '这篇文献一共有多少样本',
-            'df_column_name': 'AI_样本数量'
-        }
-        # Add more questions as needed
-    ],
+# ---------------------------------------------------------------------------
+# Environment loading (shared with ``abstractScreener``)
+# ---------------------------------------------------------------------------
 
-    # 数据文件配置 (MODIFIED)
-    'INPUT_PDF_FOLDER_PATH': '/Users/xiaotian/Downloads/250520test', # *** NEW: Specify the folder containing PDF files ***
-    # 'INPUT_FILE_PATH': '/Volumes/实验一定成功！/Dropbox/文献检索分析/250520 cited Gordon 2017.xlsx', # This is now replaced by INPUT_PDF_FOLDER_PATH
-    'OUTPUT_FILE_SUFFIX': '_analyzed',
-    'OUTPUT_FILE_TYPE': 'xlsx', # 'xlsx' or 'csv'
 
-    # 其他配置
-    'API_REQUEST_DELAY': 5, # Increased delay as direct file processing can be slower/more intensive
-    # 'MAX_TEXT_LENGTH_FOR_PROMPT': 30000 # No longer needed as we are not extracting text manually
+def load_env_file(env_path: str = ".env") -> None:
+    """Load environment variables from a .env file if present."""
+
+    path = Path(env_path)
+    if not path.exists():
+        return
+
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+load_env_file()
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+DEFAULT_CONFIG: Dict[str, object] = {
+    # AI service configuration
+    "AI_SERVICE": "openai",  # "openai" or "gemini"
+    "MODEL_NAME": "gpt-4o",
+    "OPENAI_API_KEY": "",
+    "GEMINI_API_KEY": "",
+    "API_BASE": "",  # optional base url for local deployments
+
+    # Research configuration
+    "RESEARCH_QUESTION": "",
+    "CRITERIA": [],  # e.g. ["是否为field study"]
+    "DETAILED_ANALYSIS_QUESTIONS": [],  # same structure as abstractScreener
+
+    # Data file configuration
+    "INPUT_PDF_FOLDER_PATH": "",
+    "METADATA_FILE_PATH": "",  # optional CSV/XLSX containing article metadata
+    "METADATA_ID_COLUMNS": ["DOI", "Title"],
+    "OUTPUT_FILE_SUFFIX": "_analyzed",
+    "OUTPUT_FILE_TYPE": "xlsx",  # "xlsx" or "csv"
+
+    # Other configuration
+    "API_REQUEST_DELAY": 1,
 }
 
-# --- AI Client Initialization ---
-def initialize_ai_clients(config):
-    """Initializes and returns AI clients based on the configuration."""
-    clients = {}
-    if config['AI_SERVICE'] == 'gemini':
-        if not config['GEMINI_API_KEY'] or config['GEMINI_API_KEY'] == 'YOUR_GEMINI_API_KEY_HERE':
-            print("错误：Gemini API密钥未配置。请在DEFAULT_CONFIG中设置或通过环境变量GEMINI_API_KEY设置。")
+
+def load_config_from_json(path: Optional[str]) -> Dict[str, object]:
+    """Load configuration from a JSON file and merge with defaults."""
+
+    config = DEFAULT_CONFIG.copy()
+    if path and os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as f:
+            user_cfg = json.load(f)
+        config.update(user_cfg)
+    return config
+
+
+# ---------------------------------------------------------------------------
+# AI initialisation and helpers
+# ---------------------------------------------------------------------------
+
+
+def initialize_ai(config: Dict[str, object]) -> None:
+    """Validate API keys and configure environment for LiteLLM."""
+
+    service = config.get("AI_SERVICE")
+    model = config.get("MODEL_NAME")
+    api_base = config.get("API_BASE") or os.getenv("API_BASE")
+    if api_base:
+        os.environ["OPENAI_BASE_URL"] = api_base
+
+    if service == "openai":
+        api_key = config.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("错误：OpenAI API密钥未配置。")
             sys.exit(1)
-        genai.configure(api_key=config['GEMINI_API_KEY'])
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        }
-        clients['gemini'] = genai.GenerativeModel(
-            config['GEMINI_MODEL_NAME'],
-            safety_settings=safety_settings
-            )
-        print(f"Gemini 客户端已使用模型 {config['GEMINI_MODEL_NAME']} 初始化 (用于直接PDF处理)。")
+        os.environ["OPENAI_API_KEY"] = api_key
+    elif service == "gemini":
+        api_key = config.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            print("错误：Gemini API密钥未配置。")
+            sys.exit(1)
+        os.environ["GEMINI_API_KEY"] = api_key
     else:
-        # This case should ideally not be reached if AI_SERVICE is hardcoded or validated to be 'gemini'
-        print(f"错误：无效的AI服务 '{config['AI_SERVICE']}'。此脚本当前仅支持 'gemini'。")
+        print(f"错误：无效的AI服务 '{service}'。必须是 'openai' 或 'gemini'。")
         sys.exit(1)
-    return clients
 
-# --- User Input/Config Retrieval ---
-def get_user_inputs_from_config(config):
-    """Retrieves research questions, criteria, and detailed questions from config."""
-    research_question = config['RESEARCH_QUESTION']
-    criteria = config['CRITERIA']
-    detailed_analysis_questions = config.get('DETAILED_ANALYSIS_QUESTIONS', [])
-
-    if not research_question or research_question == '请在此处定义您的核心研究问题或理论模型。':
-        print("错误：研究问题未在CONFIG中定义。")
-        sys.exit(1)
-    if not criteria or not all(isinstance(c, str) and c for c in criteria):
-        print("错误：筛选条件列表为空或包含无效条目。请在CONFIG中定义。")
-        sys.exit(1)
-    if not detailed_analysis_questions:
-        print("警告：未在CONFIG中定义细化分析问题 (DETAILED_ANALYSIS_QUESTIONS)。将不会进行细化分析。")
-    elif not all(isinstance(q, dict) and 'prompt_key' in q and 'question_text' in q and 'df_column_name' in q for q in detailed_analysis_questions):
-        print("错误：DETAILED_ANALYSIS_QUESTIONS 中的一个或多个条目格式不正确。每个条目应为包含 'prompt_key', 'question_text', 'df_column_name' 的字典。")
-        sys.exit(1)
-    
-    return {
-        'research_question': research_question,
-        'criteria': criteria,
-        'detailed_analysis_questions': detailed_analysis_questions
-    }
-
-# --- PDF Folder and File Handling ---
-def get_pdf_folder_path_from_config(config):
-    """Gets and validates the PDF input folder path from config."""
-    folder_path = config['INPUT_PDF_FOLDER_PATH']
-    if not folder_path or folder_path == '/path/to/your/pdf_folder': 
-         print("错误：输入PDF文件夹路径未在CONFIG中正确配置 (INPUT_PDF_FOLDER_PATH)。")
-         sys.exit(1)
-    if not os.path.isdir(folder_path):
-        print(f"错误：配置文件中指定的PDF文件夹路径 '{folder_path}' 不存在或不是一个目录。")
-        sys.exit(1)
-    return folder_path
-
-def list_pdf_files(folder_path):
-    """Lists all PDF files in the given folder."""
-    pdf_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
-    if not pdf_files:
-        print(f"警告：在文件夹 '{folder_path}' 中未找到PDF文件。")
-    return pdf_files
-
-# --- PDF Text Extraction (Removed as it was for OpenAI) ---
-# def extract_text_from_pdf(pdf_path, max_length=None): ...
+    print(f"LiteLLM 已使用模型 {model} 初始化 (服务: {service})。")
 
 
-# --- AI Prompt Construction ---
-def construct_ai_prompt_instructions(research_question, screening_criteria, detailed_analysis_questions):
-    """
-    Constructs the textual instructions part of the prompt for the AI.
-    """
-    criteria_prompts_str = ",\n".join([f'        "{criterion}": "请回答 \'是\', \'否\', 或 \'不确定\'"' for criterion in screening_criteria])
+def get_ai_response(
+    pdf_path: str,
+    prompt: str,
+    config: Dict[str, object],
+) -> str:
+    """Send a PDF and prompt to the configured model and return raw text."""
 
-    detailed_analysis_prompts_list = []
-    if detailed_analysis_questions:
-        for q_config in detailed_analysis_questions:
-            detailed_analysis_prompts_list.append(f'        "{q_config["prompt_key"]}": "{q_config["question_text"]}"')
-    detailed_analysis_prompts_str = ",\n".join(detailed_analysis_prompts_list)
+    mime_type = mimetypes.guess_type(pdf_path)[0] or "application/pdf"
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
 
-    detailed_analysis_section = ""
-    if detailed_analysis_prompts_str:
-        detailed_analysis_section = f"""
-    "detailed_analysis": {{
-{detailed_analysis_prompts_str}
-    }},"""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": prompt},
+                {
+                    "type": "input_file",
+                    "input_file": {
+                        "file_name": os.path.basename(pdf_path),
+                        "mime_type": mime_type,
+                        "data": pdf_bytes,
+                    },
+                },
+            ],
+        }
+    ]
 
-    prompt_instructions = f"""请仔细阅读所提供的文献内容，并结合给定的理论模型/研究问题进行分析。
-请严格按照以下JSON格式返回您的分析结果，所有文本内容请使用中文：
-
-理论模型/研究问题：{research_question}
-
-JSON输出格式要求：
-{{
-{detailed_analysis_section}
-    "screening_results": {{
-{criteria_prompts_str}
-    }}
-}}
-
-重要提示：
-1.  对于 "detailed_analysis" 内的每一个子问题（如果存在），请提供简洁、针对性的中文回答。如果文献内容中信息不足以回答某个子问题，请注明“文献未提供相关信息”。
-2.  对于 "screening_results" 中的每一个筛选条件，请仅使用 "是"、"否" 或 "不确定" 作为回答。
-3.  确保整个输出是一个合法的JSON对象。
-"""
-    return prompt_instructions
-
-# --- AI Interaction and Response Parsing ---
-def get_ai_response(pdf_file_path, base_prompt_instructions, ai_clients, config, detailed_analysis_questions_config, criteria_config):
-    """
-    Calls the Gemini AI service with the PDF file and gets the response.
-    Returns a JSON string (either valid AI response or an error JSON).
-    """
-    def _build_error_json(error_message_detail):
-        error_da = {}
-        if detailed_analysis_questions_config:
-            for q_conf in detailed_analysis_questions_config:
-                error_da[q_conf['prompt_key']] = error_message_detail
-        
-        error_sr = {criterion: error_message_detail for criterion in criteria_config}
-        
-        error_dict = {}
-        if error_da: 
-            error_dict["detailed_analysis"] = error_da
-        error_dict["screening_results"] = error_sr
-        
-        return json.dumps(error_dict)
-
+    response = completion(model=config["MODEL_NAME"], messages=messages)
+    # LiteLLM returns a dict similar to OpenAI responses
     try:
-        if config['AI_SERVICE'] == 'gemini': # This should be the only path now
-            print(f"  Gemini: 正在准备和上传 PDF '{os.path.basename(pdf_file_path)}' 进行分析...")
-            model = ai_clients['gemini']
-            
-            mime_type, _ = mimetypes.guess_type(pdf_file_path)
-            if mime_type is None:
-                mime_type = 'application/pdf'
-            
-            print(f"  Gemini: 使用MIME类型 '{mime_type}' 上传文件 '{os.path.basename(pdf_file_path)}'.")
-            pdf_file_for_api = genai.upload_file(path=pdf_file_path, mime_type=mime_type, display_name=os.path.basename(pdf_file_path))
-            print(f"  Gemini: 文件 '{os.path.basename(pdf_file_path)}' 上传中...资源名称初步为: {pdf_file_for_api.name}")
-
-            while pdf_file_for_api.state.name == "PROCESSING":
-                print(f"  Gemini: 文件 '{os.path.basename(pdf_file_path)}' ({pdf_file_for_api.name}) 仍在处理中，请稍候...")
-                time.sleep(5) 
-                pdf_file_for_api = genai.get_file(name=pdf_file_for_api.name) 
-                if pdf_file_for_api.state.name == "FAILED":
-                    print(f"  Gemini: 文件 '{os.path.basename(pdf_file_path)}' ({pdf_file_for_api.name}) 处理失败。")
-                    try:
-                        genai.delete_file(name=pdf_file_for_api.name)
-                        print(f"  Gemini: 已尝试删除处理失败的文件 '{pdf_file_for_api.name}'.")
-                    except Exception as delete_e:
-                        print(f"  Gemini: 删除处理失败的文件 '{pdf_file_for_api.name}' 时出错: {delete_e}")
-                    return _build_error_json(f"错误：Gemini 文件处理失败 - {pdf_file_for_api.name}")
-
-            if pdf_file_for_api.state.name != "ACTIVE":
-                 print(f"  Gemini: 文件 '{os.path.basename(pdf_file_path)}' ({pdf_file_for_api.name}) 未激活。当前状态: {pdf_file_for_api.state.name}")
-                 return _build_error_json(f"错误：Gemini 文件未激活 - {pdf_file_for_api.name}, 状态: {pdf_file_for_api.state.name}")
-
-            print(f"  Gemini: 文件 '{os.path.basename(pdf_file_path)}' ({pdf_file_for_api.name}) 已激活，准备发送分析请求。")
-            generation_config = genai.types.GenerationConfig(
-                response_mime_type="application/json" 
-            )
-            contents = [
-                pdf_file_for_api, 
-                base_prompt_instructions 
-            ]
-            response = model.generate_content(contents, generation_config=generation_config)
-            
-            try:
-                genai.delete_file(name=pdf_file_for_api.name)
-                print(f"  Gemini: 已成功处理并删除上传的文件 '{pdf_file_for_api.name}'.")
-            except Exception as e_delete:
-                print(f"  Gemini: 删除文件 '{pdf_file_for_api.name}' 时出错: {e_delete}")
-
-            return response.text 
-        else:
-            # This case should not be reached if config is correctly managed
-            print(f"严重错误：AI 服务配置不为 'gemini' ({config['AI_SERVICE']})。")
-            return _build_error_json(f"严重配置错误：AI 服务不是 'gemini'")
-            
-    except genai.types.generation_types.BlockedPromptException as e:
-        print(f"Gemini API 请求错误 - Prompt被阻止: {e}")
-        return _build_error_json("错误：Gemini Prompt被阻止")
-    except genai.types.generation_types.StopCandidateException as e: 
-        print(f"Gemini API 请求错误 - 内容生成提前停止: {e}")
-        return _build_error_json(f"错误：Gemini 内容生成提前停止 - {e}")
-    except Exception as e:
-        print(f"调用AI服务时发生未知错误 ({config['AI_SERVICE']}): {e}")
-        return _build_error_json(f"错误：调用AI服务时发生未知错误 - {e}")
-
-def parse_ai_response_json(ai_json_string, criteria_list, detailed_analysis_questions_config):
-    """
-    Parses the AI's JSON response string.
-    Ensures all expected keys are present in the output, even if parsing fails.
-    """
-    parsed_detailed_analysis = {}
-    if detailed_analysis_questions_config:
-        for q_config in detailed_analysis_questions_config:
-            parsed_detailed_analysis[q_config['prompt_key']] = "AI未提供此项信息或解析失败"
-            
-    parsed_criteria_answers = {criterion: "AI未提供此项信息或解析失败" for criterion in criteria_list}
-    
-    final_response_structure = {}
-    if detailed_analysis_questions_config:
-        final_response_structure['detailed_analysis'] = parsed_detailed_analysis
-    final_response_structure['screening_results'] = parsed_criteria_answers
-
-    try:
-        if not ai_json_string or not isinstance(ai_json_string, str):
-            error_msg = "AI响应为空或非字符串格式"
-            print(f"错误：{error_msg}。")
-            if detailed_analysis_questions_config:
-                for q_config in detailed_analysis_questions_config:
-                    final_response_structure['detailed_analysis'][q_config['prompt_key']] = error_msg
-            for criterion in criteria_list:
-                final_response_structure['screening_results'][criterion] = error_msg
-            return final_response_structure
-
-        data = json.loads(ai_json_string)
-        
-        if detailed_analysis_questions_config and "detailed_analysis" in data:
-            detailed_analysis_data_from_ai = data.get("detailed_analysis", {})
-            for q_config in detailed_analysis_questions_config:
-                prompt_k = q_config['prompt_key']
-                final_response_structure['detailed_analysis'][prompt_k] = detailed_analysis_data_from_ai.get(prompt_k, parsed_detailed_analysis[prompt_k])
-        
-        screening_results_data_from_ai = data.get("screening_results", {})
-        for criterion in criteria_list:
-            final_response_structure['screening_results'][criterion] = screening_results_data_from_ai.get(criterion, parsed_criteria_answers[criterion])
-
-        return final_response_structure
-
-    except json.JSONDecodeError as e:
-        error_msg = "JSON解析错误"
-        print(f"{error_msg}: {e}。AI原始响应: '{ai_json_string[:500]}...'")
-        if detailed_analysis_questions_config:
-            for q_config in detailed_analysis_questions_config:
-                final_response_structure['detailed_analysis'][q_config['prompt_key']] = error_msg
-        for criterion in criteria_list:
-            final_response_structure['screening_results'][criterion] = error_msg
-    except Exception as e:
-        error_msg = f"解析时发生未知错误"
-        print(f"解析AI响应时发生未知错误: {e}")
-        if detailed_analysis_questions_config:
-            for q_config in detailed_analysis_questions_config:
-                final_response_structure['detailed_analysis'][q_config['prompt_key']] = error_msg
-        for criterion in criteria_list:
-            final_response_structure['screening_results'][criterion] = error_msg
-            
-    return final_response_structure
-
-# --- Main Program ---
-def main():
-    print("--- AI辅助PDF文献分析脚本启动 (仅限Gemini直接PDF处理) ---") # Title updated
-    
-    config = DEFAULT_CONFIG 
-    # Ensure AI_SERVICE is 'gemini' if it's not already hardcoded
-    if config.get('AI_SERVICE') != 'gemini':
-        print("警告：AI_SERVICE 配置不是 'gemini'。此脚本已修改为仅支持 Gemini。将强制使用 Gemini。")
-        config['AI_SERVICE'] = 'gemini'
+        return response["choices"][0]["message"]["content"][0]["text"]
+    except Exception:
+        return ""
 
 
-    print("正在初始化AI客户端...")
-    ai_clients = initialize_ai_clients(config)
+# ---------------------------------------------------------------------------
+# Metadata matching utilities
+# ---------------------------------------------------------------------------
 
-    print("正在获取分析参数...")
-    analysis_params = get_user_inputs_from_config(config)
-    research_question = analysis_params['research_question']
-    criteria_list = analysis_params['criteria']
-    detailed_analysis_questions_config = analysis_params.get('detailed_analysis_questions', [])
 
-    print("正在扫描PDF文件...")
-    input_pdf_folder = get_pdf_folder_path_from_config(config)
-    pdf_files_names = list_pdf_files(input_pdf_folder)
+def load_metadata_file(path: str) -> pd.DataFrame:
+    """Load metadata from CSV or XLSX."""
 
-    if not pdf_files_names:
-        print("在指定文件夹中没有找到PDF文件。脚本将退出。")
-        sys.exit(0)
+    if not path:
+        raise ValueError("metadata path empty")
+    if path.lower().endswith(".csv"):
+        return pd.read_csv(path)
+    return pd.read_excel(path)
 
-    results_data = []
-    total_pdfs = len(pdf_files_names)
-    print(f"共找到 {total_pdfs} 个PDF文件待处理。")
 
-    base_prompt_instructions = construct_ai_prompt_instructions(
-        research_question, 
-        criteria_list, 
-        detailed_analysis_questions_config
+def build_pdf_metadata_mapping(
+    pdf_files: List[str],
+    metadata: pd.DataFrame,
+    id_columns: List[str],
+) -> pd.DataFrame:
+    """Match PDFs to metadata rows via identifiers (substring match)."""
+
+    mapping_rows = []
+    lower_cols = {col: metadata[col].astype(str).str.lower() for col in id_columns if col in metadata.columns}
+
+    for pdf in pdf_files:
+        name = pdf.lower()
+        matched_idx = None
+        for col, series in lower_cols.items():
+            hits = series[series.notna() & series.apply(lambda x: x in name)]
+            if not hits.empty:
+                matched_idx = hits.index[0]
+                break
+        row = metadata.loc[matched_idx].to_dict() if matched_idx is not None else {}
+        row["PDF File"] = pdf
+        mapping_rows.append(row)
+
+    return pd.DataFrame(mapping_rows)
+
+
+# ---------------------------------------------------------------------------
+# Prompt construction and parsing
+# ---------------------------------------------------------------------------
+
+
+def construct_ai_prompt_instructions(
+    research_question: str,
+    screening_criteria: List[str],
+    detailed_questions: List[Dict[str, str]],
+) -> str:
+    """Construct the textual instructions for the model."""
+
+    criteria_str = ",\n".join(
+        [f'        "{c}": "请回答 \'是\', \'否\', 或 \'不确定\'"' for c in screening_criteria]
     )
 
-    for index, pdf_filename in enumerate(pdf_files_names):
-        print(f"\n正在处理第 {index + 1}/{total_pdfs} 个PDF文件: {pdf_filename}...")
-        
-        full_pdf_path = os.path.join(input_pdf_folder, pdf_filename)
-        current_result = {'PDF文件名': pdf_filename}
+    da_list = [f'        "{q["prompt_key"]}": "{q["question_text"]}"' for q in detailed_questions]
+    da_str = ",\n".join(da_list)
+    da_section = f"\n    \"detailed_analysis\": {{\n{da_str}\n    }}," if da_str else ""
 
-        ai_response_json_str = get_ai_response(
-            full_pdf_path, 
-            base_prompt_instructions, 
-            ai_clients, 
-            config, 
-            detailed_analysis_questions_config, 
-            criteria_list
-        )
-        
-        parsed_data = parse_ai_response_json(ai_response_json_str, criteria_list, detailed_analysis_questions_config)
-            
-        if detailed_analysis_questions_config and 'detailed_analysis' in parsed_data:
-            da_responses = parsed_data['detailed_analysis']
-            for q_config in detailed_analysis_questions_config:
-                current_result[q_config['df_column_name']] = da_responses.get(q_config['prompt_key'], "信息缺失或键不匹配")
-        
-        if 'screening_results' in parsed_data:
-            sr_responses = parsed_data['screening_results']
-            for criterion_text in criteria_list:
-                current_result[f'筛选_{criterion_text}'] = sr_responses.get(criterion_text, "信息缺失或键不匹配")
-        else: 
-             for criterion_text in criteria_list:
-                current_result[f'筛选_{criterion_text}'] = "AI响应严重错误或解析失败"
-        
-        results_data.append(current_result)
-        print(f"  完成处理: {pdf_filename}")
-        time.sleep(config['API_REQUEST_DELAY'])
+    return f"""请阅读所提供的文献并根据研究问题进行分析。请严格按照以下JSON格式以中文回答：
+{{{da_section}
+    "screening_results": {{
+{criteria_str}
+    }}
+}}
+"""
 
-    df_results = pd.DataFrame(results_data)
-    folder_name = os.path.basename(os.path.normpath(input_pdf_folder))
-    output_file_base = f"{folder_name}{config['OUTPUT_FILE_SUFFIX']}"
-    output_file_ext = f".{config.get('OUTPUT_FILE_TYPE', 'xlsx')}"
-    output_folder = input_pdf_folder 
-    output_file_path = os.path.join(output_folder, f"{output_file_base}{output_file_ext}")
 
+def parse_ai_response_json(
+    ai_json_string: str,
+    criteria_list: List[str],
+    detailed_questions: List[Dict[str, str]],
+) -> Dict[str, Dict[str, str]]:
+    """Parse the JSON response, ensuring all keys exist."""
+
+    final = {"detailed_analysis": {}, "screening_results": {}}
     try:
-        if output_file_ext == '.csv':
-            df_results.to_csv(output_file_path, index=False, encoding='utf-8-sig')
-        elif output_file_ext == '.xlsx':
-            df_results.to_excel(output_file_path, index=False, engine='openpyxl')
-        print(f"\n处理完成！结果已保存到: {output_file_path}")
-    except Exception as e:
-        print(f"保存结果文件时出错: {e}")
+        data = json.loads(ai_json_string)
+    except Exception:
+        for q in detailed_questions:
+            final["detailed_analysis"][q["prompt_key"]] = "解析失败"
+        for c in criteria_list:
+            final["screening_results"][c] = "解析失败"
+        return final
 
-    print("--- 脚本执行完毕 ---")
+    for q in detailed_questions:
+        final["detailed_analysis"][q["prompt_key"]] = data.get("detailed_analysis", {}).get(q["prompt_key"], "缺失")
+    for c in criteria_list:
+        final["screening_results"][c] = data.get("screening_results", {}).get(c, "缺失")
+    return final
 
-if __name__ == '__main__':
+
+# ---------------------------------------------------------------------------
+# Main program
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="AI-assisted PDF screening")
+    parser.add_argument("--config", help="Path to JSON config file", default=None)
+    parser.add_argument("--pdf-folder", help="Folder containing PDFs", default=None)
+    parser.add_argument("--metadata-file", help="Optional metadata CSV/XLSX", default=None)
+    args = parser.parse_args()
+
+    config = load_config_from_json(args.config)
+    if args.pdf_folder:
+        config["INPUT_PDF_FOLDER_PATH"] = args.pdf_folder
+    if args.metadata_file:
+        config["METADATA_FILE_PATH"] = args.metadata_file
+
+    initialize_ai(config)
+
+    research_question = config.get("RESEARCH_QUESTION", "")
+    criteria_list = config.get("CRITERIA", [])
+    detailed_questions = config.get("DETAILED_ANALYSIS_QUESTIONS", [])
+
+    pdf_folder = config.get("INPUT_PDF_FOLDER_PATH")
+    if not pdf_folder or not os.path.isdir(pdf_folder):
+        print("错误：未提供有效的PDF文件夹路径。")
+        sys.exit(1)
+
+    pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith(".pdf")]
+    if not pdf_files:
+        print("在指定文件夹中未找到PDF文件。")
+        sys.exit(0)
+
+    metadata_path = config.get("METADATA_FILE_PATH")
+    if metadata_path:
+        try:
+            metadata_df = load_metadata_file(metadata_path)
+            mapping_df = build_pdf_metadata_mapping(
+                pdf_files, metadata_df, config.get("METADATA_ID_COLUMNS", [])
+            )
+            map_path = os.path.join(pdf_folder, "pdf_metadata_mapping.csv")
+            mapping_df.to_csv(map_path, index=False, encoding="utf-8-sig")
+            print(f"已生成PDF与元数据映射表: {map_path}")
+        except Exception as e:
+            print(f"元数据匹配失败: {e}")
+
+    base_prompt = construct_ai_prompt_instructions(
+        research_question, criteria_list, detailed_questions
+    )
+
+    results = []
+    for pdf in tqdm(pdf_files, desc="Processing PDFs"):
+        full_path = os.path.join(pdf_folder, pdf)
+        raw_text = get_ai_response(full_path, base_prompt, config)
+        parsed = parse_ai_response_json(raw_text, criteria_list, detailed_questions)
+
+        row: Dict[str, object] = {"PDF文件名": pdf}
+        for q in detailed_questions:
+            row[q["df_column_name"]] = parsed["detailed_analysis"][q["prompt_key"]]
+        for c in criteria_list:
+            row[f"筛选_{c}"] = parsed["screening_results"][c]
+        results.append(row)
+        time.sleep(config.get("API_REQUEST_DELAY", 1))
+
+    df = pd.DataFrame(results)
+    folder_name = os.path.basename(os.path.normpath(pdf_folder))
+    output_base = f"{folder_name}{config['OUTPUT_FILE_SUFFIX']}"
+    output_ext = f".{config.get('OUTPUT_FILE_TYPE', 'xlsx')}"
+    output_path = os.path.join(pdf_folder, f"{output_base}{output_ext}")
+
+    if output_ext == ".csv":
+        df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    else:
+        df.to_excel(output_path, index=False, engine="openpyxl")
+    print(f"处理完成，结果已保存到 {output_path}")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()
+
