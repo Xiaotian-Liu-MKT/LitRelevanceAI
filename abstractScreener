@@ -39,65 +39,21 @@ DEFAULT_CONFIG = {
     'MODEL_NAME': 'gpt-4o',
     'OPENAI_API_KEY': '',
     'GEMINI_API_KEY': '',
-    
-    # 研究配置 (这些可以考虑从用户输入或单独的配置文件读取)
-    'RESEARCH_QUESTION': 'Does unhinged (vs. normal) name of an AI agent increase consumers usage intention of the AI agent',
-    'CRITERIA': [
-        '筛选条件：文献是否shitposting或者unhinged names有关？',
-        '筛选条件：文献是否与中文互联网中提到的“这个人/事/物好抽象”的概念有关？',
-        # '筛选条件2：文献是否是文献综述',
-        # '筛选条件3：文献是否涉及亲社会/亲环境/可持续性消费行为',
-    ],
 
-    # 通用细化分析问题配置
-    # 用户可以定义任意数量和内容的细化问题
-    # 每个问题由一个字典定义，包含:
-    #   'prompt_key': 在发送给AI的JSON中使用的键名 (建议使用英文下划线命名法)
-    #   'question_text': 向AI提出的具体问题文本 (中文)
-    #   'df_column_name': 在输出Excel/CSV中对应的列名 (中文)
-    'DETAILED_ANALYSIS_QUESTIONS': [
-        {
-            'prompt_key': 'connection', # 示例键名
-            'question_text': '这篇文章与消费者行为学有关吗', # 示例问题
-            'df_column_name': 'connection' # 示例列名
-        },
-        {
-            'prompt_key': 'connection2', # 示例键名
-            'question_text': '这篇文章与我关注的研究问题是否有任何的联系？', # 示例问题
-            'df_column_name': 'connection2' # 示例列名
-        },
-        # {
-        #     'prompt_key': 'q2_model',
-        #     'question_text': '这篇文献理论模型是什么？请用X->M->Y的形式展现，如果有调节变量也请指出。',
-        #     'df_column_name': '模型'
-        # },
-        # {
-        #     'prompt_key': 'q3_specific_behavior',
-        #     'question_text': '这篇文献中具体关注的消费者的什么行为？',
-        #     'df_column_name': '核心消费者行为'
-        # },
+    # 研究配置 - 研究问题可为空
+    'RESEARCH_QUESTION': '',  # 空表示通用筛选模式
+    'GENERAL_SCREENING_MODE': True,  # 是否启用通用筛选模式
 
-        # 用户可以根据需要添加更多或修改现有问题
-        # 例如，针对特定研究问题："The influence of natural (vs. artificial) sweeteners in food/drink on consumers' purchase intention"
-        # 可以这样配置：
-        # {
-        #     'prompt_key': 'sweetener_type_focus',
-        #     'question_text': '这篇文献主要关注哪种类型的甜味剂（天然、人造、两者皆有、未区分）？',
-        #     'df_column_name': 'AI_甜味剂类型焦点'
-        # },
-        # {
-        #     'prompt_key': 'purchase_intention_link',
-        #     'question_text': '文献是如何将甜味剂与消费者的“购买意愿”联系起来的？',
-        #     'df_column_name': 'AI_购买意愿关联方式'
-        # },
-    ],
+    # 外部问题配置
+    'QUESTIONS_CONFIG_PATH': 'questions_config.json',
+    'CONFIG_MODE': 'weekly_screening',
 
     # 数据文件配置
-    'INPUT_FILE_PATH': 'C:/Users/91784/Downloads/scopus (8).csv', # 例如: 'data/scopus_export.xlsx'
+    'INPUT_FILE_PATH': 'C:/Users/91784/Downloads/scopus (8).csv',  # 例如: 'data/scopus_export.xlsx'
     'OUTPUT_FILE_SUFFIX': '_analyzed',
 
     # 其他配置
-    'API_REQUEST_DELAY': 1, 
+    'API_REQUEST_DELAY': 1,
     'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题'],
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
@@ -122,28 +78,36 @@ def initialize_ai(config):
         sys.exit(1)
     print(f"LiteLLM 已使用模型 {model} 初始化 (服务: {service})。")
 
+def load_questions_config(mode, path='questions_config.json'):
+    if not os.path.exists(path):
+        print(f"警告：未找到问题配置文件 {path}，将使用空配置。")
+        return [], []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        cfg = data.get(mode, {})
+        open_q = cfg.get('open_questions', [])
+        yes_no_q = cfg.get('yes_no_questions', [])
+        return open_q, yes_no_q
+    except Exception as e:
+        print(f"读取问题配置文件失败: {e}")
+        return [], []
+
+
 def get_user_inputs_from_config(config):
-    research_question = config['RESEARCH_QUESTION']
-    criteria = config['CRITERIA']
-    detailed_analysis_questions = config.get('DETAILED_ANALYSIS_QUESTIONS', [])
+    research_question = config.get('RESEARCH_QUESTION', '')
+    mode = config.get('CONFIG_MODE', 'weekly_screening')
+    questions_path = config.get('QUESTIONS_CONFIG_PATH', 'questions_config.json')
+    open_q, yes_no_q = load_questions_config(mode, questions_path)
 
-    if not research_question or research_question == '请在此处定义您的核心研究问题或理论模型。':
-        print("错误：研究问题未在CONFIG中定义。")
+    if not open_q and not yes_no_q:
+        print("错误：未在问题配置文件中找到任何问题。")
         sys.exit(1)
-    if not criteria or not all(isinstance(c, str) and c for c in criteria): # 检查criteria是否有效
-        print("错误：筛选条件列表为空或包含无效条目。请在CONFIG中定义。")
-        sys.exit(1)
-    if not detailed_analysis_questions: # 检查细化问题是否至少有一个
-        print("警告：未在CONFIG中定义细化分析问题 (DETAILED_ANALYSIS_QUESTIONS)。将不会进行细化分析。")
-    elif not all(isinstance(q, dict) and 'prompt_key' in q and 'question_text' in q and 'df_column_name' in q for q in detailed_analysis_questions):
-        print("错误：DETAILED_ANALYSIS_QUESTIONS 中的一个或多个条目格式不正确。每个条目应为包含 'prompt_key', 'question_text', 'df_column_name' 的字典。")
-        sys.exit(1)
-
 
     return {
         'research_question': research_question,
-        'criteria': criteria,
-        'detailed_analysis_questions': detailed_analysis_questions
+        'open_questions': open_q,
+        'yes_no_questions': yes_no_q
     }
 
 def get_file_path_from_config(config):
@@ -197,12 +161,11 @@ def load_and_validate_data(file_path, config):
     print(f"成功识别列 - 标题: '{title_column}', 摘要: '{abstract_column}'")
     return df, title_column, abstract_column
 
-def prepare_dataframe(df, criteria_list, detailed_analysis_questions_config):
-    if detailed_analysis_questions_config:
-        for q_config in detailed_analysis_questions_config:
-            df[q_config['df_column_name']] = ''
-    for criterion_text in criteria_list:
-        df[f'筛选_{criterion_text}'] = ''
+def prepare_dataframe(df, open_questions, yes_no_questions):
+    for q in open_questions:
+        df[q['column_name']] = ''
+    for q in yes_no_questions:
+        df[q['column_name']] = ''
     return df
 
 def construct_ai_prompt(title, abstract, research_question, screening_criteria, detailed_analysis_questions):
@@ -245,126 +208,148 @@ JSON输出格式要求：
 """
     return prompt
 
-def get_ai_response(prompt_text, config, detailed_analysis_questions_config, criteria_config):
-    """调用选定的AI服务并获取响应。在出错时返回包含所有预期键的错误JSON。"""
-    def _build_error_json(error_message):
-        error_da = {}
-        if detailed_analysis_questions_config:
-            for q_conf in detailed_analysis_questions_config:
-                error_da[q_conf['prompt_key']] = error_message
-        error_sr = {criterion: error_message for criterion in criteria_config}
-        error_dict = {}
-        if error_da:
-            error_dict["detailed_analysis"] = error_da
-        error_dict["screening_results"] = error_sr
-        return json.dumps(error_dict)
 
-    try:
-        response = completion(
-            model=config['MODEL_NAME'],
-            messages=[{"role": "user", "content": prompt_text}],
-            temperature=0.5,
-            response_format={"type": "json_object"}
-        )
-        return response['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        print(f"调用AI服务时发生未知错误 ({config['AI_SERVICE']}): {e}")
-        return _build_error_json(f"错误：调用AI服务时发生未知错误 - {e}")
+def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions):
+    if config.get('GENERAL_SCREENING_MODE') or not config.get('RESEARCH_QUESTION'):
+        open_q_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in open_questions])
+        yes_no_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in yes_no_questions])
+        prompt = f"""请快速分析以下文献的标题和摘要，帮助进行每周文献筛选：
+
+文献标题：{title}
+文献摘要：{abstract}
+
+请按以下JSON格式回答：
+{{
+    "quick_analysis": {{
+{open_q_str}
+    }},
+    "screening_results": {{
+{yes_no_str}
+    }}
+}}"""
+        return prompt
+    else:
+        screening_criteria = [q['question'] for q in yes_no_questions]
+        detailed = [{'prompt_key': q['key'], 'question_text': q['question'], 'df_column_name': q['column_name']} for q in open_questions]
+        return construct_ai_prompt(title, abstract, config['RESEARCH_QUESTION'], screening_criteria, detailed)
+
+def get_ai_response_with_retry(prompt_text, config, open_questions, yes_no_questions, max_retries=3):
+    def build_error_response(msg):
+        data = {"quick_analysis": {}, "screening_results": {}}
+        for q in open_questions:
+            data["quick_analysis"][q['key']] = msg
+        for q in yes_no_questions:
+            data["screening_results"][q['key']] = msg
+        return json.dumps(data)
+
+    for attempt in range(max_retries):
+        try:
+            response = completion(
+                model=config['MODEL_NAME'],
+                messages=[{"role": "user", "content": prompt_text}],
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+            return response['choices'][0]['message']['content'].strip()
+        except Exception as e:
+            print(f"第 {attempt + 1} 次尝试失败: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+            else:
+                return build_error_response(f"重试{max_retries}次后仍失败: {e}")
 
 
-def parse_ai_response_json(ai_json_string, criteria_list, detailed_analysis_questions_config):
-    """
-    解析AI返回的JSON字符串。
-    detailed_analysis_questions_config: 配置中定义的细化问题列表。
-    """
-    # 为所有预期的键设置默认错误/未提供信息的值
-    parsed_detailed_analysis = {}
-    if detailed_analysis_questions_config:
-        for q_config in detailed_analysis_questions_config:
-            parsed_detailed_analysis[q_config['prompt_key']] = "AI未提供此项信息或解析失败"
-            
-    parsed_criteria_answers = {criterion: "AI未提供此项信息或解析失败" for criterion in criteria_list}
-    
-    final_response_structure = {}
-    if detailed_analysis_questions_config: # 仅当配置了细化问题时，最终结构才包含 detailed_analysis
-        final_response_structure['detailed_analysis'] = parsed_detailed_analysis
-    final_response_structure['screening_results'] = parsed_criteria_answers
-
+def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
+    final_structure = {
+        "quick_analysis": {q['key']: "AI未提供此项信息或解析失败" for q in open_questions},
+        "screening_results": {q['key']: "AI未提供此项信息或解析失败" for q in yes_no_questions}
+    }
 
     try:
         if not ai_json_string or not isinstance(ai_json_string, str):
-            print(f"错误：AI响应为空或格式不正确。")
-            # 更新错误信息
-            if detailed_analysis_questions_config:
-                for q_config in detailed_analysis_questions_config:
-                    final_response_structure['detailed_analysis'][q_config['prompt_key']] = "AI响应为空或格式不正确"
-            for criterion in criteria_list:
-                final_response_structure['screening_results'][criterion] = "AI响应为空或格式不正确"
-            return final_response_structure
+            print("错误：AI响应为空或格式不正确。")
+            return final_structure
 
         data = json.loads(ai_json_string)
-        
-        # 提取细化分析部分 (如果存在)
-        if detailed_analysis_questions_config and "detailed_analysis" in data:
-            detailed_analysis_data_from_ai = data.get("detailed_analysis", {})
-            for q_config in detailed_analysis_questions_config:
-                prompt_k = q_config['prompt_key']
-                # 使用 get 获取值，如果键不存在于AI响应中，则保留默认的“未提供信息”
-                final_response_structure['detailed_analysis'][prompt_k] = detailed_analysis_data_from_ai.get(prompt_k, parsed_detailed_analysis[prompt_k])
-        
-        # 提取筛选结果
-        screening_results_data_from_ai = data.get("screening_results", {})
-        for criterion in criteria_list:
-            final_response_structure['screening_results'][criterion] = screening_results_data_from_ai.get(criterion, parsed_criteria_answers[criterion])
 
-        return final_response_structure # 返回包含所有预期键的字典
+        qa = data.get("quick_analysis", {})
+        sr = data.get("screening_results", {})
+        for q in open_questions:
+            final_structure["quick_analysis"][q['key']] = qa.get(q['key'], final_structure["quick_analysis"][q['key']])
+        for q in yes_no_questions:
+            final_structure["screening_results"][q['key']] = sr.get(q['key'], final_structure["screening_results"][q['key']])
+
+        return final_structure
 
     except json.JSONDecodeError as e:
         print(f"JSON解析错误: {e}。AI原始响应: '{ai_json_string[:500]}...'")
-        if detailed_analysis_questions_config:
-            for q_config in detailed_analysis_questions_config:
-                final_response_structure['detailed_analysis'][q_config['prompt_key']] = "JSON解析错误"
-        for criterion in criteria_list:
-            final_response_structure['screening_results'][criterion] = "JSON解析错误"
     except Exception as e:
         print(f"解析AI响应时发生未知错误: {e}")
-        if detailed_analysis_questions_config:
-            for q_config in detailed_analysis_questions_config:
-                final_response_structure['detailed_analysis'][q_config['prompt_key']] = f"解析时发生未知错误"
-        for criterion in criteria_list:
-            final_response_structure['screening_results'][criterion] = f"解析时发生未知错误"
-            
-    return final_response_structure
 
-def analyze_article(df, index, row, title_col, abstract_col, research_question, criteria_list, detailed_analysis_questions_config, config):
+    return final_structure
+
+
+def save_progress(df, output_path, current_index):
+    temp_path = output_path.replace('.', '_temp.')
+    if output_path.endswith('.csv'):
+        df.to_csv(temp_path, index=False, encoding='utf-8-sig')
+    else:
+        df.to_excel(temp_path, index=False, engine='openpyxl')
+    progress_info = {
+        'last_processed_index': current_index,
+        'timestamp': time.time()
+    }
+    with open(output_path.replace('.', '_progress.json'), 'w', encoding='utf-8') as f:
+        json.dump(progress_info, f)
+
+
+def resume_from_progress(output_path):
+    progress_file = output_path.replace('.', '_progress.json')
+    if os.path.exists(progress_file):
+        with open(progress_file, 'r', encoding='utf-8') as f:
+            progress = json.load(f)
+        return progress.get('last_processed_index', -1) + 1
+    return 0
+
+
+def generate_weekly_summary(df, criteria_columns):
+    summary = {
+        'total_articles': len(df),
+        'screening_results': {}
+    }
+    for col in criteria_columns:
+        if col in df.columns:
+            value_counts = df[col].value_counts()
+            summary['screening_results'][col] = {
+                '是': int(value_counts.get('是', 0)),
+                '否': int(value_counts.get('否', 0)),
+                '不确定': int(value_counts.get('不确定', 0))
+            }
+    return summary
+
+def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config):
     title = str(row[title_col]) if pd.notna(row[title_col]) else "无标题"
     abstract = str(row[abstract_col]) if pd.notna(row[abstract_col]) else "无摘要"
 
     if title == "无标题" and abstract == "无摘要":
         print("警告：文章标题和摘要均缺失，跳过此条目。")
-        if detailed_analysis_questions_config:
-            for q_config in detailed_analysis_questions_config:
-                df.at[index, q_config['df_column_name']] = "标题和摘要均缺失"
-        for criterion_text in criteria_list:
-            df.at[index, f'筛选_{criterion_text}'] = "无法处理"
+        for q in open_questions:
+            df.at[index, q['column_name']] = "标题和摘要均缺失"
+        for q in yes_no_questions:
+            df.at[index, q['column_name']] = "无法处理"
         return
 
-    prompt = construct_ai_prompt(title, abstract, research_question, criteria_list, detailed_analysis_questions_config)
-    ai_response_json_str = get_ai_response(prompt, config, detailed_analysis_questions_config, criteria_list)
-    parsed_data = parse_ai_response_json(ai_response_json_str, criteria_list, detailed_analysis_questions_config)
+    prompt = construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions)
+    ai_response_json_str = get_ai_response_with_retry(prompt, config, open_questions, yes_no_questions)
+    parsed_data = parse_ai_response_json(ai_response_json_str, open_questions, yes_no_questions)
 
-    if detailed_analysis_questions_config and 'detailed_analysis' in parsed_data:
-        da_responses = parsed_data['detailed_analysis']
-        for q_config in detailed_analysis_questions_config:
-            df.at[index, q_config['df_column_name']] = da_responses.get(q_config['prompt_key'], "信息缺失或键不匹配")
+    qa = parsed_data.get('quick_analysis', {})
+    for q in open_questions:
+        df.at[index, q['column_name']] = qa.get(q['key'], "信息缺失")
 
-    if 'screening_results' in parsed_data:
-        sr_responses = parsed_data['screening_results']
-        for criterion_text in criteria_list:
-            df.at[index, f'筛选_{criterion_text}'] = sr_responses.get(criterion_text, "信息缺失或键不匹配")
-    else:
-        for criterion_text in criteria_list:
-            df.at[index, f'筛选_{criterion_text}'] = "AI响应严重错误"
+    sr = parsed_data.get('screening_results', {})
+    for q in yes_no_questions:
+        df.at[index, q['column_name']] = sr.get(q['key'], "信息缺失")
 
 
 # --- 主程序 ---
@@ -378,28 +363,36 @@ def main():
 
     print("正在获取分析参数...")
     analysis_params = get_user_inputs_from_config(config)
-    research_question = analysis_params['research_question']
-    criteria_list = analysis_params['criteria']
-    detailed_analysis_questions_config = analysis_params.get('detailed_analysis_questions', []) # 这是问题配置的列表
+    open_questions = analysis_params['open_questions']
+    yes_no_questions = analysis_params['yes_no_questions']
 
     print("正在加载数据文件...")
     input_file_path = get_file_path_from_config(config)
     df, title_col, abstract_col = load_and_validate_data(input_file_path, config)
 
     # 准备DataFrame以存储结果
-    df = prepare_dataframe(df, criteria_list, detailed_analysis_questions_config)
-
-    total_articles = len(df)
-    print(f"共找到 {total_articles} 篇文章待处理。")
-
-    for index, row in df.iterrows():
-        print(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
-        analyze_article(df, index, row, title_col, abstract_col, research_question, criteria_list, detailed_analysis_questions_config, config)
-        time.sleep(config['API_REQUEST_DELAY'])
+    df = prepare_dataframe(df, open_questions, yes_no_questions)
 
     base, ext = os.path.splitext(input_file_path)
     output_file_path = f"{base}{config['OUTPUT_FILE_SUFFIX']}{ext}"
-    
+    temp_path = output_file_path.replace('.', '_temp.')
+    if os.path.exists(temp_path):
+        try:
+            df = pd.read_csv(temp_path) if temp_path.endswith('.csv') else pd.read_excel(temp_path)
+            print("已加载临时进度文件。")
+        except Exception as e:
+            print(f"加载临时文件失败: {e}")
+
+    start_index = resume_from_progress(output_file_path)
+    total_articles = len(df)
+    print(f"共找到 {total_articles} 篇文章待处理。")
+
+    for index, row in df.iloc[start_index:].iterrows():
+        print(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
+        analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config)
+        save_progress(df, output_file_path, index)
+        time.sleep(config['API_REQUEST_DELAY'])
+
     try:
         if output_file_path.endswith('.csv'):
             df.to_csv(output_file_path, index=False, encoding='utf-8-sig')
@@ -409,39 +402,53 @@ def main():
     except Exception as e:
         print(f"保存结果文件时出错: {e}")
 
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+    progress_file = output_file_path.replace('.', '_progress.json')
+    if os.path.exists(progress_file):
+        os.remove(progress_file)
+
+    criteria_columns = [q['column_name'] for q in yes_no_questions]
+    summary = generate_weekly_summary(df, criteria_columns)
+    print("筛选摘要：", summary)
+
     print("--- 脚本执行完毕 ---")
 
 def run_gui():
-    """提供简易图形界面以选择文件并运行分析流程"""
+    """创建增强的GUI界面"""
     import threading
     import tkinter as tk
-    from tkinter import filedialog, messagebox
+    from tkinter import filedialog, messagebox, ttk
 
     root = tk.Tk()
-    root.title("Abstract Screener")
+    root.title("文献快速筛选工具")
 
     file_path_var = tk.StringVar()
     status_var = tk.StringVar()
+    mode_var = tk.StringVar(value=DEFAULT_CONFIG.get('CONFIG_MODE', 'weekly_screening'))
+    progress_var = tk.DoubleVar()
 
     def browse_file():
         path = filedialog.askopenfilename(filetypes=[("CSV or Excel", ("*.csv", "*.xlsx"))])
         if path:
             file_path_var.set(path)
 
-    def process_file(path):
+    def process_file(path, mode):
         config = DEFAULT_CONFIG.copy()
         config['INPUT_FILE_PATH'] = path
+        config['CONFIG_MODE'] = mode
         try:
             initialize_ai(config)
             analysis_params = get_user_inputs_from_config(config)
+            open_q = analysis_params['open_questions']
+            yes_no_q = analysis_params['yes_no_questions']
             df, title_col, abstract_col = load_and_validate_data(path, config)
-            df = prepare_dataframe(df, analysis_params['criteria'], analysis_params.get('detailed_analysis_questions', []))
+            df = prepare_dataframe(df, open_q, yes_no_q)
             total = len(df)
             for index, row in df.iterrows():
                 status_var.set(f"处理中: {index + 1}/{total}")
-                analyze_article(df, index, row, title_col, abstract_col,
-                                analysis_params['research_question'], analysis_params['criteria'],
-                                analysis_params.get('detailed_analysis_questions', []), config)
+                progress_var.set((index + 1) / total * 100)
+                analyze_article(df, index, row, title_col, abstract_col, open_q, yes_no_q, config)
                 time.sleep(config['API_REQUEST_DELAY'])
             base, ext = os.path.splitext(path)
             output_file_path = f"{base}{config['OUTPUT_FILE_SUFFIX']}{ext}"
@@ -454,18 +461,25 @@ def run_gui():
             messagebox.showerror("错误", str(e))
         finally:
             status_var.set("")
+            progress_var.set(0)
 
     def start_analysis():
         path = file_path_var.get()
         if not path:
             messagebox.showerror("错误", "请先选择文件")
             return
-        threading.Thread(target=process_file, args=(path,), daemon=True).start()
+        threading.Thread(target=process_file, args=(path, mode_var.get()), daemon=True).start()
+
+    config_frame = ttk.Frame(root)
+    config_frame.pack(pady=10)
+    ttk.Label(config_frame, text="筛选模式:").pack(side=tk.LEFT)
+    ttk.Combobox(config_frame, textvariable=mode_var, values=["weekly_screening", "specific_research"]).pack(side=tk.LEFT)
 
     tk.Label(root, text="选择CSV/XLSX文件:").pack(pady=5)
     tk.Entry(root, textvariable=file_path_var, width=40).pack(padx=5)
     tk.Button(root, text="浏览", command=browse_file).pack(pady=5)
     tk.Button(root, text="开始分析", command=start_analysis).pack(pady=5)
+    ttk.Progressbar(root, variable=progress_var, maximum=100).pack(fill=tk.X, padx=20, pady=10)
     tk.Label(root, textvariable=status_var).pack(pady=5)
     root.mainloop()
 
