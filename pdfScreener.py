@@ -14,7 +14,7 @@ import mimetypes # To help guess MIME type for Gemini
 DEFAULT_CONFIG = {
     # AI服务配置
     'AI_SERVICE': 'openai',
-    'GEMINI_API_KEY': 'AIzaSyAxKQxMSfqUPnvjcyMfvgAxW5xobvLVkmQ',  # Gemini API密钥
+    'GEMINI_API_KEY': '',  # Gemini API密钥
     'GEMINI_MODEL_NAME': 'gemini-2.0-flash',
     
     # 研究配置
