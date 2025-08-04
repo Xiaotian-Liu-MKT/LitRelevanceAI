@@ -6,6 +6,8 @@ import time
 import json # 用于解析JSON响应
 import sys # 用于退出脚本
 
+# GUI 相关库在需要时才导入，避免在纯命令行环境中引入不必要依赖
+
 # 配置部分
 DEFAULT_CONFIG = {
     # AI服务配置
@@ -385,5 +387,67 @@ def main():
 
     print("--- 脚本执行完毕 ---")
 
+def run_gui():
+    """提供简易图形界面以选择文件并运行分析流程"""
+    import threading
+    import tkinter as tk
+    from tkinter import filedialog, messagebox
+
+    root = tk.Tk()
+    root.title("Abstract Screener")
+
+    file_path_var = tk.StringVar()
+    status_var = tk.StringVar()
+
+    def browse_file():
+        path = filedialog.askopenfilename(filetypes=[("CSV or Excel", ("*.csv", "*.xlsx"))])
+        if path:
+            file_path_var.set(path)
+
+    def process_file(path):
+        config = DEFAULT_CONFIG.copy()
+        config['INPUT_FILE_PATH'] = path
+        try:
+            initialize_ai(config)
+            analysis_params = get_user_inputs_from_config(config)
+            df, title_col, abstract_col = load_and_validate_data(path, config)
+            df = prepare_dataframe(df, analysis_params['criteria'], analysis_params.get('detailed_analysis_questions', []))
+            total = len(df)
+            for index, row in df.iterrows():
+                status_var.set(f"处理中: {index + 1}/{total}")
+                analyze_article(df, index, row, title_col, abstract_col,
+                                analysis_params['research_question'], analysis_params['criteria'],
+                                analysis_params.get('detailed_analysis_questions', []), config)
+                time.sleep(config['API_REQUEST_DELAY'])
+            base, ext = os.path.splitext(path)
+            output_file_path = f"{base}{config['OUTPUT_FILE_SUFFIX']}{ext}"
+            if output_file_path.endswith('.csv'):
+                df.to_csv(output_file_path, index=False, encoding='utf-8-sig')
+            else:
+                df.to_excel(output_file_path, index=False, engine='openpyxl')
+            messagebox.showinfo("完成", f"处理完成，结果已保存到: {output_file_path}")
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+        finally:
+            status_var.set("")
+
+    def start_analysis():
+        path = file_path_var.get()
+        if not path:
+            messagebox.showerror("错误", "请先选择文件")
+            return
+        threading.Thread(target=process_file, args=(path,), daemon=True).start()
+
+    tk.Label(root, text="选择CSV/XLSX文件:").pack(pady=5)
+    tk.Entry(root, textvariable=file_path_var, width=40).pack(padx=5)
+    tk.Button(root, text="浏览", command=browse_file).pack(pady=5)
+    tk.Button(root, text="开始分析", command=start_analysis).pack(pady=5)
+    tk.Label(root, textvariable=status_var).pack(pady=5)
+    root.mainloop()
+
+
 if __name__ == '__main__':
-    main()
+    if '--gui' in sys.argv:
+        run_gui()
+    else:
+        main()
