@@ -1,20 +1,20 @@
 import pandas as pd
 import os
-import openai # OpenAI SDK v1.x.x
-import google.generativeai as genai # Gemini SDK
+from litellm import completion
 import openpyxl
 import time
 import json # 用于解析JSON响应
 import sys # 用于退出脚本
 
+# GUI 相关库在需要时才导入，避免在纯命令行环境中引入不必要依赖
+
 # 配置部分
 DEFAULT_CONFIG = {
     # AI服务配置
     'AI_SERVICE': 'openai',  # 可选: 'openai' 或 'gemini'
-    'OPENAI_API_KEY': '',  # OpenAI API密钥
-    'GEMINI_API_KEY': 'your_gemini_api_key',  # Gemini API密钥
-    'OPENAI_MODEL_NAME': 'gpt-4o',
-    'GEMINI_MODEL_NAME': 'gemini-2.0-flash',
+    'MODEL_NAME': 'gpt-4o',
+    'OPENAI_API_KEY': '',
+    'GEMINI_API_KEY': '',
     
     # 研究配置 (这些可以考虑从用户输入或单独的配置文件读取)
     'RESEARCH_QUESTION': 'Does unhinged (vs. normal) name of an AI agent increase consumers usage intention of the AI agent',
@@ -78,25 +78,25 @@ DEFAULT_CONFIG = {
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
 
-def initialize_ai_clients(config):
-    clients = {}
-    if config['AI_SERVICE'] == 'openai':
-        if config['OPENAI_API_KEY'] == 'YOUR_OPENAI_API_KEY_HERE' or not config['OPENAI_API_KEY']:
+def initialize_ai(config):
+    service = config['AI_SERVICE']
+    model = config['MODEL_NAME']
+    if service == 'openai':
+        api_key = config.get('OPENAI_API_KEY') or os.getenv('OPENAI_API_KEY')
+        if not api_key:
             print("错误：OpenAI API密钥未配置。请在DEFAULT_CONFIG中设置或通过环境变量OPENAI_API_KEY设置。")
             sys.exit(1)
-        clients['openai'] = openai.OpenAI(api_key=config['OPENAI_API_KEY'])
-        print(f"OpenAI 客户端已使用模型 {config['OPENAI_MODEL_NAME']} 初始化。")
-    elif config['AI_SERVICE'] == 'gemini':
-        if config['GEMINI_API_KEY'] == 'YOUR_GEMINI_API_KEY_HERE' or not config['GEMINI_API_KEY']:
+        os.environ['OPENAI_API_KEY'] = api_key
+    elif service == 'gemini':
+        api_key = config.get('GEMINI_API_KEY') or os.getenv('GEMINI_API_KEY')
+        if not api_key:
             print("错误：Gemini API密钥未配置。请在DEFAULT_CONFIG中设置或通过环境变量GEMINI_API_KEY设置。")
             sys.exit(1)
-        genai.configure(api_key=config['GEMINI_API_KEY'])
-        clients['gemini'] = genai.GenerativeModel(config['GEMINI_MODEL_NAME'])
-        print(f"Gemini 客户端已使用模型 {config['GEMINI_MODEL_NAME']} 初始化。")
+        os.environ['GEMINI_API_KEY'] = api_key
     else:
-        print(f"错误：无效的AI服务 '{config['AI_SERVICE']}'。必须是 'openai' 或 'gemini'。")
+        print(f"错误：无效的AI服务 '{service}'。必须是 'openai' 或 'gemini'。")
         sys.exit(1)
-    return clients
+    print(f"LiteLLM 已使用模型 {model} 初始化 (服务: {service})。")
 
 def get_user_inputs_from_config(config):
     research_question = config['RESEARCH_QUESTION']
@@ -173,6 +173,14 @@ def load_and_validate_data(file_path, config):
     print(f"成功识别列 - 标题: '{title_column}', 摘要: '{abstract_column}'")
     return df, title_column, abstract_column
 
+def prepare_dataframe(df, criteria_list, detailed_analysis_questions_config):
+    if detailed_analysis_questions_config:
+        for q_config in detailed_analysis_questions_config:
+            df[q_config['df_column_name']] = ''
+    for criterion_text in criteria_list:
+        df[f'筛选_{criterion_text}'] = ''
+    return df
+
 def construct_ai_prompt(title, abstract, research_question, screening_criteria, detailed_analysis_questions):
     criteria_prompts_str = ",\n".join([f'        "{criterion}": "请回答 \'是\', \'否\', 或 \'不确定\'"' for criterion in screening_criteria])
 
@@ -213,53 +221,31 @@ JSON输出格式要求：
 """
     return prompt
 
-def get_ai_response(prompt_text, ai_clients, config, detailed_analysis_questions_config, criteria_config):
+def get_ai_response(prompt_text, config, detailed_analysis_questions_config, criteria_config):
     """调用选定的AI服务并获取响应。在出错时返回包含所有预期键的错误JSON。"""
-    # 构建错误响应的辅助函数
     def _build_error_json(error_message):
         error_da = {}
         if detailed_analysis_questions_config:
             for q_conf in detailed_analysis_questions_config:
                 error_da[q_conf['prompt_key']] = error_message
-        
         error_sr = {criterion: error_message for criterion in criteria_config}
-        
         error_dict = {}
-        if error_da: # 只有在有细化问题时才添加detailed_analysis键
+        if error_da:
             error_dict["detailed_analysis"] = error_da
         error_dict["screening_results"] = error_sr
-        
         return json.dumps(error_dict)
 
     try:
-        if config['AI_SERVICE'] == 'openai':
-            client = ai_clients['openai']
-            response = client.chat.completions.create(
-                model=config['OPENAI_MODEL_NAME'],
-                messages=[{"role": "user", "content": prompt_text}],
-                temperature=0.5, 
-                response_format={"type": "json_object"} 
-            )
-            return response.choices[0].message.content.strip()
-        
-        elif config['AI_SERVICE'] == 'gemini':
-            model = ai_clients['gemini']
-            generation_config = genai.types.GenerationConfig(
-                response_mime_type="application/json" 
-            )
-            response = model.generate_content(prompt_text, generation_config=generation_config)
-            return response.text 
-            
-    except openai.APIError as e:
-        print(f"OpenAI API 请求错误: {e}")
-        return _build_error_json(f"错误：OpenAI API 请求错误 - {e}")
-    except genai.types.generation_types.BlockedPromptException as e:
-        print(f"Gemini API 请求错误 - Prompt被阻止: {e}")
-        return _build_error_json("错误：Gemini Prompt被阻止")
+        response = completion(
+            model=config['MODEL_NAME'],
+            messages=[{"role": "user", "content": prompt_text}],
+            temperature=0.5,
+            response_format={"type": "json_object"}
+        )
+        return response['choices'][0]['message']['content'].strip()
     except Exception as e:
         print(f"调用AI服务时发生未知错误 ({config['AI_SERVICE']}): {e}")
         return _build_error_json(f"错误：调用AI服务时发生未知错误 - {e}")
-    # return None # 不应该到达这里，因为上面已经返回了错误JSON
 
 
 def parse_ai_response_json(ai_json_string, criteria_list, detailed_analysis_questions_config):
@@ -326,15 +312,45 @@ def parse_ai_response_json(ai_json_string, criteria_list, detailed_analysis_ques
             
     return final_response_structure
 
+def analyze_article(df, index, row, title_col, abstract_col, research_question, criteria_list, detailed_analysis_questions_config, config):
+    title = str(row[title_col]) if pd.notna(row[title_col]) else "无标题"
+    abstract = str(row[abstract_col]) if pd.notna(row[abstract_col]) else "无摘要"
+
+    if title == "无标题" and abstract == "无摘要":
+        print("警告：文章标题和摘要均缺失，跳过此条目。")
+        if detailed_analysis_questions_config:
+            for q_config in detailed_analysis_questions_config:
+                df.at[index, q_config['df_column_name']] = "标题和摘要均缺失"
+        for criterion_text in criteria_list:
+            df.at[index, f'筛选_{criterion_text}'] = "无法处理"
+        return
+
+    prompt = construct_ai_prompt(title, abstract, research_question, criteria_list, detailed_analysis_questions_config)
+    ai_response_json_str = get_ai_response(prompt, config, detailed_analysis_questions_config, criteria_list)
+    parsed_data = parse_ai_response_json(ai_response_json_str, criteria_list, detailed_analysis_questions_config)
+
+    if detailed_analysis_questions_config and 'detailed_analysis' in parsed_data:
+        da_responses = parsed_data['detailed_analysis']
+        for q_config in detailed_analysis_questions_config:
+            df.at[index, q_config['df_column_name']] = da_responses.get(q_config['prompt_key'], "信息缺失或键不匹配")
+
+    if 'screening_results' in parsed_data:
+        sr_responses = parsed_data['screening_results']
+        for criterion_text in criteria_list:
+            df.at[index, f'筛选_{criterion_text}'] = sr_responses.get(criterion_text, "信息缺失或键不匹配")
+    else:
+        for criterion_text in criteria_list:
+            df.at[index, f'筛选_{criterion_text}'] = "AI响应严重错误"
+
 
 # --- 主程序 ---
 def main():
     print("--- AI辅助文献分析脚本启动 ---")
-    
-    config = DEFAULT_CONFIG 
+
+    config = DEFAULT_CONFIG
 
     print("正在初始化AI客户端...")
-    ai_clients = initialize_ai_clients(config)
+    initialize_ai(config)
 
     print("正在获取分析参数...")
     analysis_params = get_user_inputs_from_config(config)
@@ -347,53 +363,14 @@ def main():
     df, title_col, abstract_col = load_and_validate_data(input_file_path, config)
 
     # 准备DataFrame以存储结果
-    if detailed_analysis_questions_config:
-        for q_config in detailed_analysis_questions_config:
-            df[q_config['df_column_name']] = '' # 使用配置中定义的列名
-    
-    for criterion_text in criteria_list:
-        df[f'筛选_{criterion_text}'] = '' 
+    df = prepare_dataframe(df, criteria_list, detailed_analysis_questions_config)
 
     total_articles = len(df)
     print(f"共找到 {total_articles} 篇文章待处理。")
 
     for index, row in df.iterrows():
         print(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
-        
-        title = str(row[title_col]) if pd.notna(row[title_col]) else "无标题"
-        abstract = str(row[abstract_col]) if pd.notna(row[abstract_col]) else "无摘要"
-
-        if title == "无标题" and abstract == "无摘要":
-            print("警告：文章标题和摘要均缺失，跳过此条目。")
-            if detailed_analysis_questions_config:
-                for q_config in detailed_analysis_questions_config:
-                    df.at[index, q_config['df_column_name']] = "标题和摘要均缺失"
-            for criterion_text in criteria_list:
-                df.at[index, f'筛选_{criterion_text}'] = "无法处理"
-            continue
-
-        prompt = construct_ai_prompt(title, abstract, research_question, criteria_list, detailed_analysis_questions_config)
-        ai_response_json_str = get_ai_response(prompt, ai_clients, config, detailed_analysis_questions_config, criteria_list)
-
-        # 解析响应，即使是错误JSON，也会返回包含所有预期键的结构
-        parsed_data = parse_ai_response_json(ai_response_json_str, criteria_list, detailed_analysis_questions_config)
-            
-        # 填充细化分析结果 (如果配置了)
-        if detailed_analysis_questions_config and 'detailed_analysis' in parsed_data:
-            da_responses = parsed_data['detailed_analysis']
-            for q_config in detailed_analysis_questions_config:
-                # da_responses 的键是 prompt_key, q_config['df_column_name'] 是要写入的列名
-                df.at[index, q_config['df_column_name']] = da_responses.get(q_config['prompt_key'], "信息缺失或键不匹配")
-        
-        # 填充筛选结果
-        if 'screening_results' in parsed_data:
-            sr_responses = parsed_data['screening_results']
-            for criterion_text in criteria_list:
-                df.at[index, f'筛选_{criterion_text}'] = sr_responses.get(criterion_text, "信息缺失或键不匹配")
-        else: # 如果连 screening_results 都没有，说明解析非常失败
-             for criterion_text in criteria_list:
-                df.at[index, f'筛选_{criterion_text}'] = "AI响应严重错误"
-            
+        analyze_article(df, index, row, title_col, abstract_col, research_question, criteria_list, detailed_analysis_questions_config, config)
         time.sleep(config['API_REQUEST_DELAY'])
 
     base, ext = os.path.splitext(input_file_path)
@@ -410,5 +387,67 @@ def main():
 
     print("--- 脚本执行完毕 ---")
 
+def run_gui():
+    """提供简易图形界面以选择文件并运行分析流程"""
+    import threading
+    import tkinter as tk
+    from tkinter import filedialog, messagebox
+
+    root = tk.Tk()
+    root.title("Abstract Screener")
+
+    file_path_var = tk.StringVar()
+    status_var = tk.StringVar()
+
+    def browse_file():
+        path = filedialog.askopenfilename(filetypes=[("CSV or Excel", ("*.csv", "*.xlsx"))])
+        if path:
+            file_path_var.set(path)
+
+    def process_file(path):
+        config = DEFAULT_CONFIG.copy()
+        config['INPUT_FILE_PATH'] = path
+        try:
+            initialize_ai(config)
+            analysis_params = get_user_inputs_from_config(config)
+            df, title_col, abstract_col = load_and_validate_data(path, config)
+            df = prepare_dataframe(df, analysis_params['criteria'], analysis_params.get('detailed_analysis_questions', []))
+            total = len(df)
+            for index, row in df.iterrows():
+                status_var.set(f"处理中: {index + 1}/{total}")
+                analyze_article(df, index, row, title_col, abstract_col,
+                                analysis_params['research_question'], analysis_params['criteria'],
+                                analysis_params.get('detailed_analysis_questions', []), config)
+                time.sleep(config['API_REQUEST_DELAY'])
+            base, ext = os.path.splitext(path)
+            output_file_path = f"{base}{config['OUTPUT_FILE_SUFFIX']}{ext}"
+            if output_file_path.endswith('.csv'):
+                df.to_csv(output_file_path, index=False, encoding='utf-8-sig')
+            else:
+                df.to_excel(output_file_path, index=False, engine='openpyxl')
+            messagebox.showinfo("完成", f"处理完成，结果已保存到: {output_file_path}")
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+        finally:
+            status_var.set("")
+
+    def start_analysis():
+        path = file_path_var.get()
+        if not path:
+            messagebox.showerror("错误", "请先选择文件")
+            return
+        threading.Thread(target=process_file, args=(path,), daemon=True).start()
+
+    tk.Label(root, text="选择CSV/XLSX文件:").pack(pady=5)
+    tk.Entry(root, textvariable=file_path_var, width=40).pack(padx=5)
+    tk.Button(root, text="浏览", command=browse_file).pack(pady=5)
+    tk.Button(root, text="开始分析", command=start_analysis).pack(pady=5)
+    tk.Label(root, textvariable=status_var).pack(pady=5)
+    root.mainloop()
+
+
 if __name__ == '__main__':
-    main()
+    if '--gui' in sys.argv:
+        run_gui()
+    else:
+        main()
