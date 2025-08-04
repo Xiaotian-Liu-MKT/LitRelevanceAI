@@ -3,7 +3,7 @@ Based on Dr Muhammad Rashid Saeed's workshop on systematic literature analysis, 
 
 Now we can customize specific questions for filtering the literature (yes or no questions) or to set some very detailed specific questions (such as what the research question of the article is).
 
-I have got time to do the translation yet. Will be updated later if requested.
+I haven't had time to do the translation yet. Will be updated later if requested.
 
 # Usage suggestions
 I personally feel that the most appropriate usage method is to use a relatively broad search strategy when searching in Scopus, but to provide as detailed a theoretical model description as possible when presenting research topics.
