@@ -90,7 +90,36 @@ Please return in the following JSON format:
                     messages=[{"role": "user", "content": prompt}],
                     temperature=DEFAULT_TEMPERATURE
                 )
-                return json.loads(response.choices[0].message.content)
+
+                # Extract and sanitize response text to ensure valid JSON
+                response_text = response.choices[0].message.content.strip()
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:]
+                if response_text.startswith("```"):
+                    response_text = response_text[3:]
+                if response_text.endswith("```"):
+                    response_text = response_text[:-3]
+
+                response_text = response_text.strip()
+                try:
+                    return json.loads(response_text)
+                except json.JSONDecodeError:
+                    # Fallback parsing similar to Gemini handling
+                    import re
+                    relevance_score_match = re.search(r'"relevance_score"\s*:\s*(\d+)', response_text)
+                    relevance_score = int(relevance_score_match.group(1)) if relevance_score_match else 0
+
+                    analysis_match = re.search(r'"analysis"\s*:\s*"([^"]*)"', response_text)
+                    analysis = analysis_match.group(1) if analysis_match else "Unable to extract analysis result from response"
+
+                    lit_review_match = re.search(r'"literature_review_suggestion"\s*:\s*"([^"]*)"', response_text)
+                    lit_review = lit_review_match.group(1) if lit_review_match else ""
+
+                    return {
+                        "relevance_score": relevance_score,
+                        "analysis": analysis,
+                        "literature_review_suggestion": lit_review
+                    }
             else:  # gemini
                 # Add safety prompt to ensure JSON format output
                 formatted_prompt = prompt + "\nPlease ensure to return valid JSON format without any extra text, code block markers, or explanations."
