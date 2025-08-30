@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "litrx"
+version = "0.1.0"
+description = "Literature relevance analysis tools"
+authors = [{name = "Unknown"}]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pandas",
+    "openai",
+    "google-generativeai",
+    "litellm",
+    "tqdm",
+    "openpyxl",
+]
+
+[project.scripts]
+litrx = "litrx.cli:main"

@@ -338,9 +338,3 @@ def main() -> None:
     else:
         df.to_excel(output_path, index=False, engine="openpyxl")
     print(f"处理完成，结果已保存到 {output_path}")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    main()
-
