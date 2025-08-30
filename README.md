@@ -7,7 +7,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 ## Features
 
 - **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question.
-- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined in `questions_config.json`. Add `--gui` to launch a minimal Tkinter interface.
+- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined in `configs/questions/abstract.yaml`. Add `--gui` to launch a minimal Tkinter interface.
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results.
 - **Unified GUI** – `python -m litrx --gui` launches a tabbed window combining CSV analysis, abstract screening and PDF screening.
 - **Flexible model support** – Choose between OpenAI or Gemini APIs, with model names and temperature easily customized in the scripts.
@@ -40,7 +40,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 
 ## Configuration
 
-All commands merge `.env` values with an optional JSON or YAML file passed via `--config`, producing a `DEFAULT_CONFIG` that command-line flags can override.
+All commands merge `.env` values with an optional JSON or YAML file passed via `--config`, producing a `DEFAULT_CONFIG` that command-line flags can override. Default settings and question templates live under `configs/`.
 
 ## Advanced Tools
 
@@ -49,17 +49,17 @@ All commands merge `.env` values with an optional JSON or YAML file passed via `
   litrx abstract            # command-line mode
   litrx abstract --gui      # graphical mode
   ```
-  Edit `questions_config.json` to change screening questions or column names.
+  Edit files in `configs/questions/` to change screening questions or column names.
 - **PDF screening**
   ```bash
   litrx pdf --config path/to/config.yml --pdf-folder path/to/pdfs
   ```
-  The JSON or YAML config specifies research questions, screening criteria and output type.
+  The JSON or YAML config specifies research questions, screening criteria and output type. Question templates default to the YAML files in `configs/questions/`.
 
 ## Customisation Tips
 
 - Modify default model names or temperature values at the top of the scripts.
-- Adjust the prompts in `csv_analyzer.py` or question sets in `questions_config.json` to collect different information.
+- Adjust the prompts in `csv_analyzer.py` or question sets in `configs/questions/` to collect different information.
 - Use `.env` or supply a config file to set API keys and other defaults.
 
 ## License

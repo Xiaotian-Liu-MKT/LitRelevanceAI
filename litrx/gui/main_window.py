@@ -11,7 +11,7 @@ from ..config import DEFAULT_CONFIG as BASE_CONFIG, load_env_file
 from ..ai_client import AIClient
 from ..csv_analyzer import LiteratureAnalyzer
 from ..abstract_screener import (
-    get_user_inputs_from_config,
+    load_config as load_abs_config,
     load_and_validate_data,
     prepare_dataframe,
     analyze_article,
@@ -168,9 +168,9 @@ class MainWindow:
         config['CONFIG_MODE'] = mode
         try:
             client = AIClient(config)
-            params = get_user_inputs_from_config(config)
-            open_q = params['open_questions']
-            yes_no_q = params['yes_no_questions']
+            _, q = load_abs_config()
+            open_q = q.get('open_questions', [])
+            yes_no_q = q.get('yes_no_questions', [])
             df, title_col, abstract_col = load_and_validate_data(path, config)
             df = prepare_dataframe(df, open_q, yes_no_q)
             total = len(df)

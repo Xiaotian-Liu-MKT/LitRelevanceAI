@@ -1,0 +1,8 @@
+open_questions:
+  - key: relation_summary
+    question: "概述该文献与研究主题的关联。"
+    column_name: "关联摘要"
+yes_no_questions:
+  - key: include_review
+    question: "是否应纳入综述？"
+    column_name: "纳入综述"

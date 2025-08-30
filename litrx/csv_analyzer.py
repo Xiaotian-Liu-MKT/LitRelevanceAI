@@ -3,11 +3,17 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+import yaml
 
-from .config import DEFAULT_CONFIG as BASE_CONFIG, load_env_file
+from .config import (
+    DEFAULT_CONFIG as BASE_CONFIG,
+    load_env_file,
+    load_config as base_load_config,
+)
 from .ai_client import AIClient
 
 
@@ -19,10 +25,24 @@ DEFAULT_CONFIG = {
     "TEMPERATURE": 0.3,
 }
 
+
+def load_config(path: Optional[str] = None, questions_path: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Load module configuration and question templates."""
+
+    default_cfg = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    config = base_load_config(str(path or default_cfg), DEFAULT_CONFIG)
+
+    q_path = questions_path or Path(__file__).resolve().parent.parent / "configs" / "questions" / "csv.yaml"
+    with open(q_path, 'r', encoding='utf-8') as f:
+        questions = yaml.safe_load(f) or {}
+
+    return config, questions
+
 class LiteratureAnalyzer:
-    def __init__(self, config: Dict[str, str], research_topic: str):
+    def __init__(self, config: Dict[str, Any], questions: Dict[str, Any], research_topic: str):
         self.research_topic = research_topic
         self.config = config
+        self.questions = questions
         self.client = AIClient(config)
 
     def read_scopus_csv(self, file_path: str) -> pd.DataFrame:
@@ -216,11 +236,12 @@ def get_user_input():
 
 def main():
     try:
-        # Get user input
-        research_topic, file_path, config = get_user_input()
+        config, questions = load_config()
+        research_topic, file_path, user_cfg = get_user_input()
+        config.update(user_cfg)
 
         print("\nInitializing analyzer...")
-        analyzer = LiteratureAnalyzer(config, research_topic)
+        analyzer = LiteratureAnalyzer(config, questions, research_topic)
 
         print("Reading literature data...")
         df = analyzer.read_scopus_csv(file_path)

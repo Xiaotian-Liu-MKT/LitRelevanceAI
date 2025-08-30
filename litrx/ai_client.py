@@ -3,9 +3,26 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from litellm import completion
+
+from .config import DEFAULT_CONFIG as BASE_CONFIG, load_config as base_load_config
+
+
+def load_config(path: Optional[str] = None) -> Dict[str, Any]:
+    """Load AI client configuration.
+
+    Parameters
+    ----------
+    path:
+        Optional path to a YAML/JSON config file. When omitted, the default
+        configuration under ``configs/config.yaml`` is used.
+    """
+
+    default_path = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    return base_load_config(str(path or default_path), BASE_CONFIG)
 
 
 class AIClient:

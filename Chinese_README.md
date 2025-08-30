@@ -7,7 +7,7 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
 ## 功能特点
 
 - **CSV 相关性分析**：`litrx csv` 读取 Scopus 导出的文件，为每篇文章打出 0–100 的相关性分数，并给出解释。
-- **摘要快速筛选**：`litrx abstract` 根据 `questions_config.json` 中的自定义问题进行是/否判定和开放式问题回答，`--gui` 参数可启动简易图形界面。
+- **摘要快速筛选**：`litrx abstract` 根据 `configs/questions/abstract.yaml` 中的自定义问题进行是/否判定和开放式问题回答，`--gui` 参数可启动简易图形界面。
 - **PDF 筛选**：`litrx pdf` 会先将 PDF 转为文本再发送给模型，依据研究问题和筛选标准输出结构化结果。
 - **统一图形界面**：运行 `python -m litrx --gui` 可打开带标签页的窗口，集中进行 CSV 相关性分析、摘要筛选与 PDF 筛选。
 - **灵活的模型配置**：可在脚本中自由切换 OpenAI 或 Gemini，并调整温度、模型名称等参数。
@@ -49,7 +49,7 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
   litrx abstract            # 命令行模式
   litrx abstract --gui      # 图形界面模式
   ```
-  修改 `questions_config.json` 可自定义筛选问题与列名。
+  修改 `configs/questions/` 下的文件可自定义筛选问题与列名。
 - **PDF 筛选**
   ```bash
   litrx pdf --config path/to/config.yml --pdf-folder path/to/pdfs
@@ -59,7 +59,7 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
 ## 自定义建议
 
 - 在各脚本顶部修改默认模型或温度。
-- 编辑 `csv_analyzer.py` 中的提示词或 `questions_config.json` 中的问题以收集不同信息。
+- 编辑 `csv_analyzer.py` 中的提示词或 `configs/questions/` 中的问题以收集不同信息。
 - 通过 `.env` 或提供配置文件来设置 API 密钥和其他默认参数。
 
 ## 许可协议
