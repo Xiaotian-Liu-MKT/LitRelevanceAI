@@ -8,8 +8,9 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
 
 - **CSV 相关性分析**：`litrx csv` 读取 Scopus 导出的文件，为每篇文章打出 0–100 的相关性分数，并给出解释。
 - **摘要快速筛选**：`litrx abstract` 根据 `questions_config.json` 中的自定义问题进行是/否判定和开放式问题回答，`--gui` 参数可启动简易图形界面。
-- **PDF 筛选**：`litrx pdf` 将整篇论文发送给模型，依据研究问题和筛选标准输出结构化结果。
+ - **PDF 筛选**：`litrx pdf` 会先将 PDF 转为文本再发送给模型，依据研究问题和筛选标准输出结构化结果。
 - **灵活的模型配置**：可在脚本中自由切换 OpenAI 或 Gemini，并调整温度、模型名称等参数。
+- **统一的配置管理**：通过 `.env` 与 JSON/YAML 配置文件合并生成 `DEFAULT_CONFIG`，命令行参数可覆盖默认值。
 - **自动保存进度**：中间结果和最终结果都会写入带时间戳的 CSV 或 XLSX 文件，避免进度丢失。
 
 ## 安装步骤
@@ -31,6 +32,10 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
    ```
 3. 根据提示选择 API、输入研究主题并提供 CSV 路径，结果将保存在同目录下。
 
+## 配置说明
+
+所有命令会将 `.env` 与通过 `--config` 指定的 JSON/YAML 文件合并成 `DEFAULT_CONFIG`，命令行参数可进一步覆盖默认值。
+
 ## 高级工具
 
 - **摘要筛选**
@@ -41,15 +46,15 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
   修改 `questions_config.json` 可自定义筛选问题与列名。
 - **PDF 筛选**
   ```bash
-  litrx pdf --config path/to/config.json --pdf-folder path/to/pdfs
+  litrx pdf --config path/to/config.yml --pdf-folder path/to/pdfs
   ```
-  JSON 配置文件用于指定研究问题、筛选标准和输出格式。
+  JSON 或 YAML 配置文件用于指定研究问题、筛选标准和输出格式。
 
 ## 自定义建议
 
 - 在各脚本顶部修改默认模型或温度。
 - 编辑 `csv_analyzer.py` 中的提示词或 `questions_config.json` 中的问题以收集不同信息。
-- 通过 `.env` 或直接修改脚本设置 API 密钥。
+- 通过 `.env` 或提供配置文件来设置 API 密钥和其他默认参数。
 
 ## 许可协议
 

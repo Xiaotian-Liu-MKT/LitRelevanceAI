@@ -1,12 +1,13 @@
 """AI-assisted PDF screening tool.
 
 This module mirrors the structure of ``abstractScreener.py`` but operates on
-PDF files.  It uses LiteLLM so that either OpenAI-, Gemini-, or locally hosted
-OpenAI-compatible APIs can be used transparently.  A folder of PDFs can be
-screened against user-defined criteria and optional detailed-analysis
-questions.  When a metadata file is supplied, the script will attempt to match
-PDFs to their metadata rows via identifiers such as DOI or Title and output a
-mapping table for later reuse.
+PDF files.  Each PDF is converted to plain text and sent to the model.  It uses
+LiteLLM so that either OpenAI-, Gemini-, or locally hosted OpenAI-compatible
+APIs can be used transparently.  A folder of PDFs can be screened against
+user-defined criteria and optional detailed-analysis questions.  When a
+metadata file is supplied, the script will attempt to match PDFs to their
+metadata rows via identifiers such as DOI or Title and output a mapping table
+for later reuse.
 
 The script reads configuration from ``DEFAULT_CONFIG`` which can be overridden
 by providing a JSON configuration file or command line arguments.  Environment
@@ -22,38 +23,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
-import mimetypes
 import os
 import sys
 import time
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import openpyxl  # noqa: F401  # needed for pandas Excel writer
 import pandas as pd
-from litellm import completion
 from tqdm import tqdm
+from pypdf import PdfReader
 
-
-# ---------------------------------------------------------------------------
-# Environment loading (shared with ``abstractScreener``)
-# ---------------------------------------------------------------------------
-
-
-def load_env_file(env_path: str = ".env") -> None:
-    """Load environment variables from a .env file if present."""
-
-    path = Path(env_path)
-    if not path.exists():
-        return
-
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip())
+from .config import DEFAULT_CONFIG as BASE_CONFIG, load_config, load_env_file
+from .ai_client import AIClient
 
 
 load_env_file()
@@ -65,13 +46,7 @@ load_env_file()
 
 
 DEFAULT_CONFIG: Dict[str, object] = {
-    # AI service configuration
-    "AI_SERVICE": "openai",  # "openai" or "gemini"
-    "MODEL_NAME": "gpt-4o",
-    "OPENAI_API_KEY": "",
-    "GEMINI_API_KEY": "",
-    "API_BASE": "",  # optional base url for local deployments
-
+    **BASE_CONFIG,
     # Research configuration
     "RESEARCH_QUESTION": "",
     "CRITERIA": [],  # e.g. ["是否为field study"]
@@ -89,82 +64,26 @@ DEFAULT_CONFIG: Dict[str, object] = {
 }
 
 
-def load_config_from_json(path: Optional[str]) -> Dict[str, object]:
-    """Load configuration from a JSON file and merge with defaults."""
-
-    config = DEFAULT_CONFIG.copy()
-    if path and os.path.isfile(path):
-        with open(path, "r", encoding="utf-8") as f:
-            user_cfg = json.load(f)
-        config.update(user_cfg)
-    return config
-
-
-# ---------------------------------------------------------------------------
-# AI initialisation and helpers
-# ---------------------------------------------------------------------------
-
-
-def initialize_ai(config: Dict[str, object]) -> None:
-    """Validate API keys and configure environment for LiteLLM."""
-
-    service = config.get("AI_SERVICE")
-    model = config.get("MODEL_NAME")
-    api_base = config.get("API_BASE") or os.getenv("API_BASE")
-    if api_base:
-        os.environ["OPENAI_BASE_URL"] = api_base
-
-    if service == "openai":
-        api_key = config.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("错误：OpenAI API密钥未配置。")
-            sys.exit(1)
-        os.environ["OPENAI_API_KEY"] = api_key
-    elif service == "gemini":
-        api_key = config.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            print("错误：Gemini API密钥未配置。")
-            sys.exit(1)
-        os.environ["GEMINI_API_KEY"] = api_key
-    else:
-        print(f"错误：无效的AI服务 '{service}'。必须是 'openai' 或 'gemini'。")
-        sys.exit(1)
-
-    print(f"LiteLLM 已使用模型 {model} 初始化 (服务: {service})。")
-
-
 def get_ai_response(
     pdf_path: str,
     prompt: str,
-    config: Dict[str, object],
+    client: AIClient,
 ) -> str:
-    """Send a PDF and prompt to the configured model and return raw text."""
+    """Convert a PDF to text, send with the prompt and return raw model text."""
 
-    mime_type = mimetypes.guess_type(pdf_path)[0] or "application/pdf"
-    with open(pdf_path, "rb") as f:
-        pdf_bytes = f.read()
+    reader = PdfReader(pdf_path)
+    pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
 
     messages = [
         {
             "role": "user",
-            "content": [
-                {"type": "input_text", "text": prompt},
-                {
-                    "type": "input_file",
-                    "input_file": {
-                        "file_name": os.path.basename(pdf_path),
-                        "mime_type": mime_type,
-                        "data": pdf_bytes,
-                    },
-                },
-            ],
+            "content": f"{prompt}\n\n{pdf_text}",
         }
     ]
 
-    response = completion(model=config["MODEL_NAME"], messages=messages)
-    # LiteLLM returns a dict similar to OpenAI responses
+    response = client.request(messages)
     try:
-        return response["choices"][0]["message"]["content"][0]["text"]
+        return response["choices"][0]["message"]["content"]
     except Exception:
         return ""
 
@@ -269,18 +188,17 @@ def parse_ai_response_json(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="AI-assisted PDF screening")
-    parser.add_argument("--config", help="Path to JSON config file", default=None)
+    parser.add_argument("--config", help="Path to JSON or YAML config file", default=None)
     parser.add_argument("--pdf-folder", help="Folder containing PDFs", default=None)
     parser.add_argument("--metadata-file", help="Optional metadata CSV/XLSX", default=None)
     args = parser.parse_args()
 
-    config = load_config_from_json(args.config)
+    config = load_config(args.config, DEFAULT_CONFIG)
     if args.pdf_folder:
         config["INPUT_PDF_FOLDER_PATH"] = args.pdf_folder
     if args.metadata_file:
         config["METADATA_FILE_PATH"] = args.metadata_file
-
-    initialize_ai(config)
+    client = AIClient(config)
 
     research_question = config.get("RESEARCH_QUESTION", "")
     criteria_list = config.get("CRITERIA", [])
@@ -316,7 +234,7 @@ def main() -> None:
     results = []
     for pdf in tqdm(pdf_files, desc="Processing PDFs"):
         full_path = os.path.join(pdf_folder, pdf)
-        raw_text = get_ai_response(full_path, base_prompt, config)
+        raw_text = get_ai_response(full_path, base_prompt, client)
         parsed = parse_ai_response_json(raw_text, criteria_list, detailed_questions)
 
         row: Dict[str, object] = {"PDF文件名": pdf}
