@@ -6,7 +6,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 
 ## Features
 
-- **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question.
+- **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question. The GUI tab displays results in a sortable table, allows double-clicking to view full analyses, and can export the DataFrame.
 - **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined in `configs/questions/abstract.yaml`. Add `--gui` to launch a minimal Tkinter interface.
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results.
 - **Modular tabbed GUI** – `python -m litrx --gui` launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening.
