@@ -1,9 +1,10 @@
 import argparse
+
 from . import csv_analyzer, abstract_screener, pdf_screener
 
 
-def main() -> None:
-    """Entry point for the litrx command line interface."""
+def main(argv: list[str] | None = None) -> None:
+    """Entry point for the ``litrx`` command line interface."""
     parser = argparse.ArgumentParser(prog="litrx", description="Literature analysis tools")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -19,7 +20,7 @@ def main() -> None:
     pdf_parser = subparsers.add_parser("pdf", help="Screen PDFs in a folder")
     pdf_parser.set_defaults(func=lambda args: pdf_screener.main())
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if hasattr(args, "func"):
         args.func(args)
     else:

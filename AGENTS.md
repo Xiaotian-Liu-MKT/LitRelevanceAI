@@ -2,7 +2,7 @@
 
 ## Development
 - Install dependencies with `python -m pip install -e .`.
-- Run `litrx --help` to ensure the command line interface loads.
+- Run `python -m litrx --help` to ensure the command line interface loads.
 - Run `pytest` before committing.
 
 ## Conventions
