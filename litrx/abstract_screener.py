@@ -482,10 +482,3 @@ def run_gui():
     ttk.Progressbar(root, variable=progress_var, maximum=100).pack(fill=tk.X, padx=20, pady=10)
     tk.Label(root, textvariable=status_var).pack(pady=5)
     root.mainloop()
-
-
-if __name__ == '__main__':
-    if '--gui' in sys.argv:
-        run_gui()
-    else:
-        main()

@@ -349,7 +349,3 @@ def main():
         print(traceback.format_exc())
 
     input("\nPress Enter to exit the program...")
-
-
-if __name__ == "__main__":
-    main()
