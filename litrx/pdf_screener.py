@@ -26,14 +26,21 @@ import json
 import os
 import sys
 import time
-from typing import Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
 
 import openpyxl  # noqa: F401  # needed for pandas Excel writer
 import pandas as pd
 from tqdm import tqdm
 from pypdf import PdfReader
 
-from .config import DEFAULT_CONFIG as BASE_CONFIG, load_config, load_env_file
+from .config import (
+    DEFAULT_CONFIG as BASE_CONFIG,
+    load_config as base_load_config,
+    load_env_file,
+)
 from .ai_client import AIClient
 
 
@@ -62,6 +69,19 @@ DEFAULT_CONFIG: Dict[str, object] = {
     # Other configuration
     "API_REQUEST_DELAY": 1,
 }
+
+
+def load_config(path: Optional[str] = None, questions_path: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Load module configuration and question templates."""
+
+    default_cfg = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    config = base_load_config(str(path or default_cfg), DEFAULT_CONFIG)
+
+    q_path = questions_path or Path(__file__).resolve().parent.parent / "configs" / "questions" / "pdf.yaml"
+    with open(q_path, 'r', encoding='utf-8') as f:
+        questions = yaml.safe_load(f) or {}
+
+    return config, questions
 
 
 def get_ai_response(
@@ -193,7 +213,7 @@ def main() -> None:
     parser.add_argument("--metadata-file", help="Optional metadata CSV/XLSX", default=None)
     args = parser.parse_args()
 
-    config = load_config(args.config, DEFAULT_CONFIG)
+    config, questions = load_config(args.config)
     if args.pdf_folder:
         config["INPUT_PDF_FOLDER_PATH"] = args.pdf_folder
     if args.metadata_file:
@@ -201,8 +221,13 @@ def main() -> None:
     client = AIClient(config)
 
     research_question = config.get("RESEARCH_QUESTION", "")
-    criteria_list = config.get("CRITERIA", [])
-    detailed_questions = config.get("DETAILED_ANALYSIS_QUESTIONS", [])
+    yes_no = questions.get("yes_no_questions", [])
+    open_q = questions.get("open_questions", [])
+    criteria_list = [q["question"] for q in yes_no]
+    detailed_questions = [
+        {"prompt_key": q["key"], "question_text": q["question"], "df_column_name": q["column_name"]}
+        for q in open_q
+    ]
 
     pdf_folder = config.get("INPUT_PDF_FOLDER_PATH")
     if not pdf_folder or not os.path.isdir(pdf_folder):

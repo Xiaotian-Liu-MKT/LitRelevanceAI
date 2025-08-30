@@ -5,8 +5,15 @@ import openpyxl
 import time
 import json # 用于解析JSON响应
 import sys # 用于退出脚本
+from typing import Any, Dict, Optional, Tuple
 
-from .config import DEFAULT_CONFIG as BASE_CONFIG, load_env_file
+import yaml
+
+from .config import (
+    DEFAULT_CONFIG as BASE_CONFIG,
+    load_env_file,
+    load_config as base_load_config,
+)
 from .ai_client import AIClient
 
 
@@ -17,15 +24,9 @@ load_env_file()
 # 配置部分
 DEFAULT_CONFIG = {
     **BASE_CONFIG,
-    # AI服务配置
-    
     # 研究配置 - 研究问题可为空
     'RESEARCH_QUESTION': '',  # 空表示通用筛选模式
     'GENERAL_SCREENING_MODE': True,  # 是否启用通用筛选模式
-
-    # 外部问题配置
-    'QUESTIONS_CONFIG_PATH': 'questions_config.json',
-    'CONFIG_MODE': 'weekly_screening',
 
     # 数据文件配置
     'INPUT_FILE_PATH': 'C:/Users/91784/Downloads/scopus (8).csv',  # 例如: 'data/scopus_export.xlsx'
@@ -37,37 +38,18 @@ DEFAULT_CONFIG = {
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
 
-def load_questions_config(mode, path='questions_config.json'):
-    if not os.path.exists(path):
-        print(f"警告：未找到问题配置文件 {path}，将使用空配置。")
-        return [], []
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        cfg = data.get(mode, {})
-        open_q = cfg.get('open_questions', [])
-        yes_no_q = cfg.get('yes_no_questions', [])
-        return open_q, yes_no_q
-    except Exception as e:
-        print(f"读取问题配置文件失败: {e}")
-        return [], []
 
+def load_config(path: Optional[str] = None, questions_path: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Load module configuration and question templates."""
 
-def get_user_inputs_from_config(config):
-    research_question = config.get('RESEARCH_QUESTION', '')
-    mode = config.get('CONFIG_MODE', 'weekly_screening')
-    questions_path = config.get('QUESTIONS_CONFIG_PATH', 'questions_config.json')
-    open_q, yes_no_q = load_questions_config(mode, questions_path)
+    default_cfg = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    config = base_load_config(str(path or default_cfg), DEFAULT_CONFIG)
 
-    if not open_q and not yes_no_q:
-        print("错误：未在问题配置文件中找到任何问题。")
-        sys.exit(1)
+    q_path = questions_path or Path(__file__).resolve().parent.parent / "configs" / "questions" / "abstract.yaml"
+    with open(q_path, 'r', encoding='utf-8') as f:
+        questions = yaml.safe_load(f) or {}
 
-    return {
-        'research_question': research_question,
-        'open_questions': open_q,
-        'yes_no_questions': yes_no_q
-    }
+    return config, questions
 
 def get_file_path_from_config(config):
     file_path = config['INPUT_FILE_PATH']
@@ -314,15 +296,13 @@ def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes
 def main():
     print("--- AI辅助文献分析脚本启动 ---")
 
-    config = DEFAULT_CONFIG
+    config, questions = load_config()
 
     print("正在初始化AI客户端...")
     client = AIClient(config)
 
-    print("正在获取分析参数...")
-    analysis_params = get_user_inputs_from_config(config)
-    open_questions = analysis_params['open_questions']
-    yes_no_questions = analysis_params['yes_no_questions']
+    open_questions = questions.get('open_questions', [])
+    yes_no_questions = questions.get('yes_no_questions', [])
 
     print("正在加载数据文件...")
     input_file_path = get_file_path_from_config(config)
@@ -392,14 +372,13 @@ def run_gui():
             file_path_var.set(path)
 
     def process_file(path, mode):
-        config = DEFAULT_CONFIG.copy()
+        config, questions = load_config()
         config['INPUT_FILE_PATH'] = path
         config['CONFIG_MODE'] = mode
         try:
             client = AIClient(config)
-            analysis_params = get_user_inputs_from_config(config)
-            open_q = analysis_params['open_questions']
-            yes_no_q = analysis_params['yes_no_questions']
+            open_q = questions.get('open_questions', [])
+            yes_no_q = questions.get('yes_no_questions', [])
             df, title_col, abstract_col = load_and_validate_data(path, config)
             df = prepare_dataframe(df, open_q, yes_no_q)
             total = len(df)

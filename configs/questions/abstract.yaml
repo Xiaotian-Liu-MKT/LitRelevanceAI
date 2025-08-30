@@ -1,0 +1,14 @@
+open_questions:
+  - key: research_area
+    question: "这篇文献的主要研究领域是什么？"
+    column_name: "研究领域"
+  - key: methodology
+    question: "研究使用了什么主要方法？"
+    column_name: "研究方法"
+yes_no_questions:
+  - key: consumer_behavior
+    question: "这篇文献是否与消费者行为相关？"
+    column_name: "消费者行为相关"
+  - key: empirical_study
+    question: "这是否为实证研究？"
+    column_name: "实证研究"

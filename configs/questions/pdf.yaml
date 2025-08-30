@@ -1,0 +1,8 @@
+open_questions:
+  - key: main_findings
+    question: "主要研究发现是什么？"
+    column_name: "主要发现"
+yes_no_questions:
+  - key: field_study
+    question: "是否为field study？"
+    column_name: "是否田野研究"
