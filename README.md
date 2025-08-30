@@ -31,6 +31,11 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
    ```bash
    litrx csv
    ```
+   (or `python -m litrx csv` if the `litrx` command is unavailable)
+   For a graphical interface, run:
+   ```bash
+   python -m litrx --gui
+   ```
 3. Follow the prompts to choose API provider, enter your research topic, and supply the CSV path. Results are saved beside the input file.
 
 ## Configuration

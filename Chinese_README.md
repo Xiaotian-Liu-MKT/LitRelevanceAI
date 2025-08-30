@@ -31,6 +31,11 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
    ```bash
    litrx csv
    ```
+   （若无法直接使用 `litrx` 命令，可改用 `python -m litrx csv`）
+   如需图形界面，运行：
+   ```bash
+   python -m litrx --gui
+   ```
 3. 根据提示选择 API、输入研究主题并提供 CSV 路径，结果将保存在同目录下。
 
 ## 配置说明
