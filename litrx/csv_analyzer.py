@@ -6,29 +6,24 @@ from datetime import datetime
 from typing import Dict, List
 
 import pandas as pd
-from openai import OpenAI
 
-# Import Gemini API library
-import google.generativeai as genai
+from .config import DEFAULT_CONFIG as BASE_CONFIG, load_env_file
+from .ai_client import AIClient
 
-# Set default configurations
-DEFAULT_API_KEY = ""  # Replace with your API key, now supports OpenAI and Gemini
-DEFAULT_MODEL_OPENAI = "gpt-4o-mini"  # Or "gpt-4"; For unknown reasons, "gpt-4o" doesn't work here.
-DEFAULT_MODEL_GEMINI = "gemini-2.0-flash"  # Set the default Gemini model
-DEFAULT_TEMPERATURE = 0.3  # Set the default temperature value
-DEFAULT_API_TYPE = "gemini" # Default API type set to gemini
+
+load_env_file()
+
+DEFAULT_CONFIG = {
+    **BASE_CONFIG,
+    "MODEL_NAME": "gpt-4o-mini",
+    "TEMPERATURE": 0.3,
+}
 
 class LiteratureAnalyzer:
-    def __init__(self, api_key: str, research_topic: str, api_type: str = DEFAULT_API_TYPE):
+    def __init__(self, config: Dict[str, str], research_topic: str):
         self.research_topic = research_topic
-        self.api_type = api_type
-        if api_type == "openai":
-            self.client = OpenAI(api_key=api_key)
-        elif api_type == "gemini":
-            genai.configure(api_key=api_key)
-            self.client = genai.GenerativeModel(DEFAULT_MODEL_GEMINI)
-        else:
-            raise ValueError("Unsupported API type, only 'openai' or 'gemini' are supported")
+        self.config = config
+        self.client = AIClient(config)
 
     def read_scopus_csv(self, file_path: str) -> pd.DataFrame:
         """Read Scopus exported CSV file"""
@@ -81,137 +76,36 @@ Please return in the following JSON format:
     "analysis": "<analysis text>",
     "literature_review_suggestion": "<literature review suggestion>"
 }}"""
-
         try:
-            if self.api_type == "openai":
-                response = self.client.chat.completions.create(
-                    model=DEFAULT_MODEL_OPENAI,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=DEFAULT_TEMPERATURE
-                )
-
-                # Extract and sanitize response text to ensure valid JSON
-                response_text = response.choices[0].message.content.strip()
-                if response_text.startswith("```json"):
-                    response_text = response_text[7:]
-                if response_text.startswith("```"):
-                    response_text = response_text[3:]
-                if response_text.endswith("```"):
-                    response_text = response_text[:-3]
-
-                response_text = response_text.strip()
-                try:
-                    return json.loads(response_text)
-                except json.JSONDecodeError:
-                    # Fallback parsing similar to Gemini handling
-                    import re
-                    relevance_score_match = re.search(r'"relevance_score"\s*:\s*(\d+)', response_text)
-                    relevance_score = int(relevance_score_match.group(1)) if relevance_score_match else 0
-
-                    analysis_match = re.search(r'"analysis"\s*:\s*"([^"]*)"', response_text)
-                    analysis = analysis_match.group(1) if analysis_match else "Unable to extract analysis result from response"
-
-                    lit_review_match = re.search(r'"literature_review_suggestion"\s*:\s*"([^"]*)"', response_text)
-                    lit_review = lit_review_match.group(1) if lit_review_match else ""
-
-                    return {
-                        "relevance_score": relevance_score,
-                        "analysis": analysis,
-                        "literature_review_suggestion": lit_review
-                    }
-            else:  # gemini
-                # Add safety prompt to ensure JSON format output
-                formatted_prompt = prompt + "\nPlease ensure to return valid JSON format without any extra text, code block markers, or explanations."
-                
-                # Set generation parameters, explicitly requiring structured output
-                generation_config = {
-                    "temperature": DEFAULT_TEMPERATURE,
-                    "top_p": 0.95,
-                    "top_k": 0,
-                    "max_output_tokens": 2048,
+            response = self.client.request(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.config.get("TEMPERATURE", 0.3),
+            )
+            response_text = response["choices"][0]["message"]["content"].strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+            try:
+                return json.loads(response_text)
+            except json.JSONDecodeError:
+                import re
+                relevance_score_match = re.search(r'"relevance_score"\s*:\s*(\d+)', response_text)
+                relevance_score = int(relevance_score_match.group(1)) if relevance_score_match else 0
+                analysis_match = re.search(r'"analysis"\s*:\s*"([^"]*)"', response_text)
+                analysis = analysis_match.group(1) if analysis_match else "Unable to extract analysis result from response"
+                lit_review_match = re.search(r'"literature_review_suggestion"\s*:\s*"([^"]*)"', response_text)
+                lit_review = lit_review_match.group(1) if lit_review_match else ""
+                return {
+                    "relevance_score": relevance_score,
+                    "analysis": analysis,
+                    "literature_review_suggestion": lit_review,
                 }
-                
-                safety_settings = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                ]
-                
-                # Create a model with specific configuration
-                model = genai.GenerativeModel(
-                    model_name=DEFAULT_MODEL_GEMINI,
-                    generation_config=generation_config,
-                    safety_settings=safety_settings
-                )
-                
-                response = model.generate_content(formatted_prompt)
-                
-                # More robust response parsing
-                response_text = ""
-                try:
-                    # Try to get text from response object
-                    if hasattr(response, 'text'):
-                        response_text = response.text
-                    elif hasattr(response, 'parts'):
-                        response_text = response.parts[0].text
-                    elif hasattr(response, 'candidates') and response.candidates:
-                        for candidate in response.candidates:
-                            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
-                                for part in candidate.content.parts:
-                                    if hasattr(part, 'text'):
-                                        response_text = part.text
-                                        break
-                                if response_text:
-                                    break
-                    
-                    # Clean response text, remove possible code block markers
-                    response_text = response_text.strip()
-                    if response_text.startswith("```json"):
-                        response_text = response_text[7:]
-                    if response_text.startswith("```"):
-                        response_text = response_text[3:]
-                    if response_text.endswith("```"):
-                        response_text = response_text[:-3]
-                    
-                    response_text = response_text.strip()
-                    
-                    # Try to parse JSON
-                    return json.loads(response_text)
-                    
-                except (json.JSONDecodeError, AttributeError, IndexError) as e:
-                    print(f"Error parsing Gemini response: {str(e)}")
-                    print(f"Original response received: {response}")
-                    print(f"Extracted text: {response_text}")
-                    
-                    # If JSON parsing fails, try using regex to extract key information
-                    import re
-                    try:
-                        relevance_score_match = re.search(r'"relevance_score"\s*:\s*(\d+)', response_text)
-                        relevance_score = int(relevance_score_match.group(1)) if relevance_score_match else 0
-                        
-                        analysis_match = re.search(r'"analysis"\s*:\s*"([^"]*)"', response_text)
-                        analysis = analysis_match.group(1) if analysis_match else "Unable to extract analysis result from response"
-                        
-                        lit_review_match = re.search(r'"literature_review_suggestion"\s*:\s*"([^"]*)"', response_text)
-                        lit_review = lit_review_match.group(1) if lit_review_match else ""
-                        
-                        return {
-                            "relevance_score": relevance_score,
-                            "analysis": analysis,
-                            "literature_review_suggestion": lit_review
-                        }
-                    except Exception:
-                        # If all attempts fail, return a basic response
-                        return {
-                            "relevance_score": 0,
-                            "analysis": f"Unable to parse Gemini response. Original response: {response_text[:200]}...",
-                            "literature_review_suggestion": ""
-                        }
         except Exception as e:
-            print(f"API call error: {str(e)}")
-            return {"relevance_score": 0, "analysis": f"Analysis error: {str(e)}", "literature_review_suggestion": ""}
-
+            raise Exception(f"Failed to analyze paper: {str(e)}")
     def batch_analyze(self, df: pd.DataFrame, original_file_path: str) -> List[Dict]:
         """Batch analyze multiple papers"""
         results = []
@@ -278,20 +172,19 @@ def get_user_input():
     """Get user input configuration information"""
     print("Welcome to the Literature Relevance Analysis Tool!\n")
 
-    # Choose API type
+    config = DEFAULT_CONFIG.copy()
+
     while True:
         api_type = input("Please select the API type to use (1: OpenAI, 2: Gemini): ").strip()
         if api_type == "1":
-            api_type = "openai"
+            config["AI_SERVICE"] = "openai"
+            config["MODEL_NAME"] = config.get("MODEL_NAME", "gpt-4o-mini")
             break
         elif api_type == "2":
-            api_type = "gemini"
+            config["AI_SERVICE"] = "gemini"
+            config["MODEL_NAME"] = "gemini-2.0-flash"
             break
         print("Invalid choice, please enter 1 or 2")
-
-    # Use default API key
-    print(f"Using default API key")
-    api_key = DEFAULT_API_KEY
 
     # Get research topic
     research_topic = input("\nPlease enter your research topic: ").strip()
@@ -317,16 +210,17 @@ def get_user_input():
             print("3. If the path contains spaces, enclose it in quotes")
             print("Tip: You can drag the file directly into the terminal window\n")
 
-    return api_key, research_topic, abs_path, api_type
+    config["INPUT_FILE_PATH"] = abs_path
+    return research_topic, abs_path, config
 
 
 def main():
     try:
         # Get user input
-        api_key, research_topic, file_path, api_type = get_user_input()
+        research_topic, file_path, config = get_user_input()
 
         print("\nInitializing analyzer...")
-        analyzer = LiteratureAnalyzer(api_key, research_topic, api_type)
+        analyzer = LiteratureAnalyzer(config, research_topic)
 
         print("Reading literature data...")
         df = analyzer.read_scopus_csv(file_path)

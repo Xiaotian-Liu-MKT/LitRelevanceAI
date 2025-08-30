@@ -1,31 +1,13 @@
 import pandas as pd
 import os
 from pathlib import Path
-from litellm import completion
 import openpyxl
 import time
 import json # 用于解析JSON响应
 import sys # 用于退出脚本
 
-
-def load_env_file(env_path: str = ".env") -> None:
-    """Load environment variables from a .env file if present.
-
-    This avoids hard-coding API keys in the script and allows users to
-    store them locally. Lines starting with ``#`` or without ``=`` are
-    ignored. Existing environment variables are not overwritten.
-    """
-
-    path = Path(env_path)
-    if not path.exists():
-        return
-
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip())
+from .config import DEFAULT_CONFIG as BASE_CONFIG, load_env_file
+from .ai_client import AIClient
 
 
 load_env_file()
@@ -34,12 +16,9 @@ load_env_file()
 
 # 配置部分
 DEFAULT_CONFIG = {
+    **BASE_CONFIG,
     # AI服务配置
-    'AI_SERVICE': 'openai',  # 可选: 'openai' 或 'gemini'
-    'MODEL_NAME': 'gpt-4o',
-    'OPENAI_API_KEY': '',
-    'GEMINI_API_KEY': '',
-
+    
     # 研究配置 - 研究问题可为空
     'RESEARCH_QUESTION': '',  # 空表示通用筛选模式
     'GENERAL_SCREENING_MODE': True,  # 是否启用通用筛选模式
@@ -57,26 +36,6 @@ DEFAULT_CONFIG = {
     'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题'],
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
-
-def initialize_ai(config):
-    service = config['AI_SERVICE']
-    model = config['MODEL_NAME']
-    if service == 'openai':
-        api_key = config.get('OPENAI_API_KEY') or os.getenv('OPENAI_API_KEY')
-        if not api_key:
-            print("错误：OpenAI API密钥未配置。请在DEFAULT_CONFIG中设置或通过环境变量OPENAI_API_KEY设置。")
-            sys.exit(1)
-        os.environ['OPENAI_API_KEY'] = api_key
-    elif service == 'gemini':
-        api_key = config.get('GEMINI_API_KEY') or os.getenv('GEMINI_API_KEY')
-        if not api_key:
-            print("错误：Gemini API密钥未配置。请在DEFAULT_CONFIG中设置或通过环境变量GEMINI_API_KEY设置。")
-            sys.exit(1)
-        os.environ['GEMINI_API_KEY'] = api_key
-    else:
-        print(f"错误：无效的AI服务 '{service}'。必须是 'openai' 或 'gemini'。")
-        sys.exit(1)
-    print(f"LiteLLM 已使用模型 {model} 初始化 (服务: {service})。")
 
 def load_questions_config(mode, path='questions_config.json'):
     if not os.path.exists(path):
@@ -233,7 +192,7 @@ def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_qu
         detailed = [{'prompt_key': q['key'], 'question_text': q['question'], 'df_column_name': q['column_name']} for q in open_questions]
         return construct_ai_prompt(title, abstract, config['RESEARCH_QUESTION'], screening_criteria, detailed)
 
-def get_ai_response_with_retry(prompt_text, config, open_questions, yes_no_questions, max_retries=3):
+def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_no_questions, max_retries=3):
     def build_error_response(msg):
         data = {"quick_analysis": {}, "screening_results": {}}
         for q in open_questions:
@@ -244,11 +203,10 @@ def get_ai_response_with_retry(prompt_text, config, open_questions, yes_no_quest
 
     for attempt in range(max_retries):
         try:
-            response = completion(
-                model=config['MODEL_NAME'],
+            response = client.request(
                 messages=[{"role": "user", "content": prompt_text}],
                 temperature=0.3,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
             return response['choices'][0]['message']['content'].strip()
         except Exception as e:
@@ -327,7 +285,7 @@ def generate_weekly_summary(df, criteria_columns):
             }
     return summary
 
-def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config):
+def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config, client):
     title = str(row[title_col]) if pd.notna(row[title_col]) else "无标题"
     abstract = str(row[abstract_col]) if pd.notna(row[abstract_col]) else "无摘要"
 
@@ -340,7 +298,7 @@ def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes
         return
 
     prompt = construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions)
-    ai_response_json_str = get_ai_response_with_retry(prompt, config, open_questions, yes_no_questions)
+    ai_response_json_str = get_ai_response_with_retry(prompt, client, config, open_questions, yes_no_questions)
     parsed_data = parse_ai_response_json(ai_response_json_str, open_questions, yes_no_questions)
 
     qa = parsed_data.get('quick_analysis', {})
@@ -359,7 +317,7 @@ def main():
     config = DEFAULT_CONFIG
 
     print("正在初始化AI客户端...")
-    initialize_ai(config)
+    client = AIClient(config)
 
     print("正在获取分析参数...")
     analysis_params = get_user_inputs_from_config(config)
@@ -389,7 +347,7 @@ def main():
 
     for index, row in df.iloc[start_index:].iterrows():
         print(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
-        analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config)
+        analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config, client)
         save_progress(df, output_file_path, index)
         time.sleep(config['API_REQUEST_DELAY'])
 
@@ -438,7 +396,7 @@ def run_gui():
         config['INPUT_FILE_PATH'] = path
         config['CONFIG_MODE'] = mode
         try:
-            initialize_ai(config)
+            client = AIClient(config)
             analysis_params = get_user_inputs_from_config(config)
             open_q = analysis_params['open_questions']
             yes_no_q = analysis_params['yes_no_questions']
@@ -448,7 +406,7 @@ def run_gui():
             for index, row in df.iterrows():
                 status_var.set(f"处理中: {index + 1}/{total}")
                 progress_var.set((index + 1) / total * 100)
-                analyze_article(df, index, row, title_col, abstract_col, open_q, yes_no_q, config)
+                analyze_article(df, index, row, title_col, abstract_col, open_q, yes_no_q, config, client)
                 time.sleep(config['API_REQUEST_DELAY'])
             base, ext = os.path.splitext(path)
             output_file_path = f"{base}{config['OUTPUT_FILE_SUFFIX']}{ext}"

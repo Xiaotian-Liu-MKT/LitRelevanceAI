@@ -8,8 +8,9 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 
 - **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question.
 - **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined in `questions_config.json`. Add `--gui` to launch a minimal Tkinter interface.
-- **PDF screening** – `litrx pdf` sends full papers to the model, checks custom criteria and detailed questions, and saves structured results.
+ - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results.
 - **Flexible model support** – Choose between OpenAI or Gemini APIs, with model names and temperature easily customized in the scripts.
+- **Unified configuration** – `.env` values merge with JSON or YAML config files, and command-line options override the resulting `DEFAULT_CONFIG`.
 - **Automatic saving** – Interim and final results are written to CSV/XLSX files with timestamps so you never lose progress.
 
 ## Installation
@@ -31,6 +32,10 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
    ```
 3. Follow the prompts to choose API provider, enter your research topic, and supply the CSV path. Results are saved beside the input file.
 
+## Configuration
+
+All commands merge `.env` values with an optional JSON or YAML file passed via `--config`, producing a `DEFAULT_CONFIG` that command-line flags can override.
+
 ## Advanced Tools
 
 - **Abstract screening**
@@ -41,15 +46,15 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
   Edit `questions_config.json` to change screening questions or column names.
 - **PDF screening**
   ```bash
-  litrx pdf --config path/to/config.json --pdf-folder path/to/pdfs
+  litrx pdf --config path/to/config.yml --pdf-folder path/to/pdfs
   ```
-  The JSON config specifies research questions, screening criteria and output type.
+  The JSON or YAML config specifies research questions, screening criteria and output type.
 
 ## Customisation Tips
 
 - Modify default model names or temperature values at the top of the scripts.
 - Adjust the prompts in `csv_analyzer.py` or question sets in `questions_config.json` to collect different information.
-- Use `.env` or edit the scripts directly to set API keys.
+- Use `.env` or supply a config file to set API keys and other defaults.
 
 ## License
 

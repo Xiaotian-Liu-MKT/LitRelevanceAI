@@ -16,6 +16,8 @@ dependencies = [
     "litellm",
     "tqdm",
     "openpyxl",
+    "pyyaml",
+    "pypdf",
 ]
 
 [project.scripts]

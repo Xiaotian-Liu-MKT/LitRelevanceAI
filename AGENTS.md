@@ -8,3 +8,4 @@
 ## Conventions
 - Prefer `rg` for searching the repository.
 - Keep documentation in both `README.md` and `Chinese_README.md` up to date with any CLI or packaging changes.
+- Use the shared `config` and `AIClient` utilities instead of reimplementing configuration loading or model calls.
