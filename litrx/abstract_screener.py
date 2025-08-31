@@ -277,7 +277,7 @@ def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes
             df.at[index, q['column_name']] = "标题和摘要均缺失"
         for q in yes_no_questions:
             df.at[index, q['column_name']] = "无法处理"
-        return
+        return {}
 
     prompt = construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions)
     ai_response_json_str = get_ai_response_with_retry(prompt, client, config, open_questions, yes_no_questions)
@@ -290,6 +290,8 @@ def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes
     sr = parsed_data.get('screening_results', {})
     for q in yes_no_questions:
         df.at[index, q['column_name']] = sr.get(q['key'], "信息缺失")
+
+    return parsed_data
 
 
 # --- 主程序 ---
