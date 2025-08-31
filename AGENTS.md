@@ -10,3 +10,4 @@
 - Keep documentation in both `README.md` and `Chinese_README.md` up to date with any CLI or packaging changes.
 - Use the shared `config` and `AIClient` utilities instead of reimplementing configuration loading or model calls.
 - When modifying the GUI, use `BaseWindow` for shared controls and add new tabs under `litrx/gui/tabs/`, registering them with `LitRxApp`.
+- The CSV analysis tab renders results in a `ttk.Treeview` with title, relevance, and analysis columns, supports exporting results, and opens full analyses on double-click.
