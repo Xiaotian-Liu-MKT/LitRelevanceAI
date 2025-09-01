@@ -10,7 +10,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 - **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined per mode in `questions_config.json`. In the GUI, a dropdown selects the mode, an **Add Mode** button creates new presets, the **Edit Questions** dialog modifies questions, a read-only log shows model summaries, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results. The GUI tab lists selected PDFs with matched metadata and processing status, lets you set the research question, criteria, and output type, supports a metadata-only precheck, and can open the result folder when done.
 - **Modular tabbed GUI** – `python run_gui.py` (or `python -m litrx --gui`) launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening. The script auto-installs missing dependencies before starting.
-- **Flexible model support** – Choose between OpenAI or Gemini APIs, with model names and temperature easily customized in the scripts.
+- **Flexible model support** – A settings dropdown lets you switch between OpenAI and Gemini. The API key field updates to match the chosen provider and remembers previously entered keys, while model names and temperature remain customizable in the scripts.
 - **Unified configuration** – `.env` values merge with JSON or YAML config files, and command-line options override the resulting `DEFAULT_CONFIG`.
 - **Automatic saving** – Interim and final results are written to CSV/XLSX files with timestamps so you never lose progress.
 
@@ -37,13 +37,13 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
    python run_gui.py
    ```
    The first run may take a moment while required packages are installed automatically.
-3. Follow the prompts to choose API provider, enter your research topic, and supply the CSV path. Results are saved beside the input file.
+3. Follow the prompts to choose API provider, enter your research topic, and supply the CSV path. In the GUI, switching providers updates the API key field and restores any previously saved key. Results are saved beside the input file.
 
 ## Configuration
 
 All commands merge `.env` values with an optional JSON or YAML file passed via `--config`, producing a `DEFAULT_CONFIG` that command-line flags can override. Default settings and question templates live under `configs/`.
 
-When running the GUI, a **Save Config** button writes the current `AI_SERVICE`, `MODEL_NAME`, `API_BASE` and API keys to `~/.litrx_gui.yaml`. On startup the application loads `configs/config.yaml`, the saved file, and `.env` in order of increasing priority (`~/.litrx_gui.yaml` < `.env` < runtime input), so your saved preferences populate the interface automatically.
+When running the GUI, a **Save Config** button writes the current `AI_SERVICE`, `MODEL_NAME`, `API_BASE` and provider-specific API keys to `~/.litrx_gui.yaml`. Switching the service dropdown repopulates the key field with any previously saved value. On startup the application loads `configs/config.yaml`, the saved file, and `.env` in order of increasing priority (`~/.litrx_gui.yaml` < `.env` < runtime input), so your saved preferences populate the interface automatically.
 
 The base defaults for these values live in `configs/config.yaml`; edit this file if you need to change the starting GUI settings before saving.
 

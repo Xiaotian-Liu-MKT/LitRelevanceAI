@@ -45,13 +45,33 @@ class BaseWindow:
 
         top = ttk.Frame(self.root)
         top.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(top, text="API Key:").pack(side=tk.LEFT)
-        self.api_key_var = tk.StringVar(
-            value=
-            self.base_config.get("OPENAI_API_KEY")
-            or self.base_config.get("GEMINI_API_KEY", "")
+
+        ttk.Label(top, text="Service:").pack(side=tk.LEFT)
+        self.service_var = tk.StringVar(
+            value=self.base_config.get("AI_SERVICE", "openai")
         )
-        ttk.Entry(top, textvariable=self.api_key_var, width=40, show="*").pack(side=tk.LEFT, padx=5)
+        service_menu = ttk.Combobox(
+            top,
+            textvariable=self.service_var,
+            values=["openai", "gemini"],
+            width=10,
+            state="readonly",
+        )
+        service_menu.pack(side=tk.LEFT, padx=5)
+        self.current_service = self.service_var.get()
+        service_menu.bind("<<ComboboxSelected>>", self.on_service_change)
+
+        ttk.Label(top, text="API Key:").pack(side=tk.LEFT, padx=(10, 0))
+        initial_key = (
+            self.base_config.get("OPENAI_API_KEY")
+            if self.current_service == "openai"
+            else self.base_config.get("GEMINI_API_KEY", "")
+        )
+        self.api_key_var = tk.StringVar(value=initial_key)
+        ttk.Entry(top, textvariable=self.api_key_var, width=40, show="*").pack(
+            side=tk.LEFT, padx=5
+        )
+
         ttk.Label(top, text="Model:").pack(side=tk.LEFT, padx=(10, 0))
         self.model_var = tk.StringVar(value=self.base_config.get("MODEL_NAME", ""))
         ttk.Entry(top, textvariable=self.model_var, width=20).pack(side=tk.LEFT)
@@ -67,13 +87,17 @@ class BaseWindow:
     # ------------------------------------------------------------------
     def build_config(self) -> Dict[str, str]:
         config = self.base_config.copy()
+        service = self.service_var.get()
+        config["AI_SERVICE"] = service
         api_key = self.api_key_var.get().strip()
-        if api_key:
+        if service == "openai" and api_key:
             config["OPENAI_API_KEY"] = api_key
-            config["AI_SERVICE"] = config.get("AI_SERVICE", "openai")
+        elif service == "gemini" and api_key:
+            config["GEMINI_API_KEY"] = api_key
         model = self.model_var.get().strip()
         if model:
             config["MODEL_NAME"] = model
+        self.base_config.update(config)
         return config
 
     def browse_file(self, var: tk.StringVar, filetypes):
@@ -116,6 +140,18 @@ class BaseWindow:
             messagebox.showinfo(
                 "Saved", f"Configuration saved to {PERSIST_PATH}"
             )
+
+    def on_service_change(self, event=None) -> None:
+        if self.current_service == "openai":
+            self.base_config["OPENAI_API_KEY"] = self.api_key_var.get().strip()
+        else:
+            self.base_config["GEMINI_API_KEY"] = self.api_key_var.get().strip()
+
+        self.current_service = self.service_var.get()
+        if self.current_service == "openai":
+            self.api_key_var.set(self.base_config.get("OPENAI_API_KEY", ""))
+        else:
+            self.api_key_var.set(self.base_config.get("GEMINI_API_KEY", ""))
 
     def run(self) -> None:
         self.root.mainloop()
