@@ -1,10 +1,20 @@
+import os
 import tkinter as tk
-from tkinter import ttk, filedialog
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 from typing import Dict
 
-from ..config import DEFAULT_CONFIG as BASE_CONFIG, load_env_file
+from ..config import DEFAULT_CONFIG as BASE_CONFIG, load_config, load_env_file
 
+try:  # pragma: no cover - optional dependency
+    import yaml
+except Exception:  # pragma: no cover - handle missing pyyaml
+    yaml = None
+
+# Load environment variables from .env so they can override other sources
 load_env_file()
+
+PERSIST_PATH = Path.home() / ".litrx_gui.yaml"
 
 
 class BaseWindow:
@@ -13,16 +23,41 @@ class BaseWindow:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("LitRx Toolkit")
-        self.base_config: Dict[str, str] = BASE_CONFIG.copy()
+
+        repo_root = Path(__file__).resolve().parents[2]
+        config_path = repo_root / "configs" / "config.yaml"
+
+        # Start with defaults from config.yaml then layer in persisted config
+        self.base_config: Dict[str, str] = load_config(str(config_path), BASE_CONFIG)
+        self.base_config = load_config(str(PERSIST_PATH), self.base_config)
+
+        # Environment variables have higher priority than persisted config
+        for key in [
+            "AI_SERVICE",
+            "MODEL_NAME",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "API_BASE",
+        ]:
+            env_val = os.getenv(key)
+            if env_val:
+                self.base_config[key] = env_val
 
         top = ttk.Frame(self.root)
         top.pack(fill=tk.X, padx=10, pady=5)
         ttk.Label(top, text="API Key:").pack(side=tk.LEFT)
-        self.api_key_var = tk.StringVar()
+        self.api_key_var = tk.StringVar(
+            value=
+            self.base_config.get("OPENAI_API_KEY")
+            or self.base_config.get("GEMINI_API_KEY", "")
+        )
         ttk.Entry(top, textvariable=self.api_key_var, width=40, show="*").pack(side=tk.LEFT, padx=5)
         ttk.Label(top, text="Model:").pack(side=tk.LEFT, padx=(10, 0))
         self.model_var = tk.StringVar(value=self.base_config.get("MODEL_NAME", ""))
         ttk.Entry(top, textvariable=self.model_var, width=20).pack(side=tk.LEFT)
+        ttk.Button(top, text="Save Config", command=self.save_config).pack(
+            side=tk.LEFT, padx=(10, 0)
+        )
 
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -50,6 +85,37 @@ class BaseWindow:
         path = filedialog.askdirectory()
         if path:
             var.set(path)
+
+    def save_config(self) -> None:
+        """Persist current configuration to ``~/.litrx_gui.yaml``."""
+
+        config = self.build_config()
+        if yaml is None:
+            messagebox.showerror(
+                "Error", "pyyaml is required to save configuration"
+            )
+            return
+
+        data = {
+            key: config.get(key, "")
+            for key in [
+                "AI_SERVICE",
+                "MODEL_NAME",
+                "API_BASE",
+                "OPENAI_API_KEY",
+                "GEMINI_API_KEY",
+            ]
+        }
+
+        try:
+            with PERSIST_PATH.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f)
+        except Exception as e:  # pragma: no cover - user feedback
+            messagebox.showerror("Error", f"Failed to save config: {e}")
+        else:  # pragma: no cover - user feedback
+            messagebox.showinfo(
+                "Saved", f"Configuration saved to {PERSIST_PATH}"
+            )
 
     def run(self) -> None:
         self.root.mainloop()

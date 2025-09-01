@@ -42,6 +42,10 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
 
 所有命令会将 `.env` 与通过 `--config` 指定的 JSON/YAML 文件合并成 `DEFAULT_CONFIG`，命令行参数可进一步覆盖默认值。
 
+图形界面提供 **“保存配置”** 按钮，可将当前的 `AI_SERVICE`、`MODEL_NAME`、`API_BASE` 等设置写入 `~/.litrx_gui.yaml`。应用启动时会依次加载 `configs/config.yaml`、该持久化文件与 `.env`，优先级从低到高为 `~/.litrx_gui.yaml` < `.env` < 运行时输入，界面会自动填充保存的偏好。
+
+这些参数的基础默认值定义在 `configs/config.yaml`，如需调整启动时的初始设置，可修改此文件。
+
 ## 高级工具
 
 - **摘要筛选**
