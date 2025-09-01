@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 from pathlib import Path
@@ -7,12 +8,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from typing import TYPE_CHECKING, Optional
 
-import yaml
 import pandas as pd
 
 from ...ai_client import AIClient
 from ...abstract_screener import (
-    load_config as load_abs_config,
+    load_mode_questions,
     load_and_validate_data,
     prepare_dataframe,
     analyze_article,
@@ -43,10 +43,21 @@ class AbstractTab:
         ).pack(side=tk.LEFT, padx=5)
 
         ttk.Label(frame, text="筛选模式:").pack(anchor=tk.W, padx=5, pady=(8, 2))
-        self.mode_var = tk.StringVar(value=ABSTRACT_CONFIG.get("CONFIG_MODE", "weekly_screening"))
-        ttk.Combobox(frame, textvariable=self.mode_var, values=["weekly_screening", "specific_research"]).pack(
-            fill=tk.X, padx=5
-        )
+        mode_frame = ttk.Frame(frame)
+        mode_frame.pack(fill=tk.X, padx=5)
+        q_path = Path(__file__).resolve().parent.parent.parent.parent / "questions_config.json"
+        try:
+            with q_path.open("r", encoding="utf-8") as f:
+                self.modes_data = json.load(f)
+                mode_options = list(self.modes_data.keys())
+        except Exception:
+            self.modes_data = {}
+            mode_options = ["weekly_screening"]
+        self.mode_var = tk.StringVar(value=mode_options[0] if mode_options else "")
+        self.mode_cb = ttk.Combobox(mode_frame, textvariable=self.mode_var, values=mode_options)
+        self.mode_cb.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(mode_frame, text="添加模式", command=self.add_mode).pack(side=tk.LEFT, padx=5)
+        self.q_config_path = q_path
 
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=5)
@@ -97,7 +108,7 @@ class AbstractTab:
         config["CONFIG_MODE"] = mode
         try:
             client = AIClient(config)
-            _, q = load_abs_config()
+            q = load_mode_questions(mode)
             open_q = q.get("open_questions", [])
             yes_no_q = q.get("yes_no_questions", [])
             df, title_col, abstract_col = load_and_validate_data(path, config)
@@ -168,15 +179,30 @@ class AbstractTab:
             self.df.to_excel(path, index=False, engine="openpyxl")
             messagebox.showinfo("成功", "Excel 已导出")
 
+    def add_mode(self) -> None:
+        name = simpledialog.askstring("新模式", "请输入模式名称:", parent=self.app.root)
+        if not name:
+            return
+        if name in self.modes_data:
+            messagebox.showerror("错误", "模式已存在")
+            return
+        desc = simpledialog.askstring("描述", "请输入模式描述:", parent=self.app.root) or ""
+        self.modes_data[name] = {"description": desc, "open_questions": [], "yes_no_questions": []}
+        with self.q_config_path.open("w", encoding="utf-8") as f:
+            json.dump(self.modes_data, f, ensure_ascii=False, indent=2)
+        self.mode_cb.configure(values=list(self.modes_data.keys()))
+        self.mode_var.set(name)
+
     def edit_questions(self) -> None:
-        path = Path(__file__).resolve().parent.parent.parent / "configs" / "questions" / "abstract.yaml"
+        mode = self.mode_var.get()
         try:
-            with path.open("r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+            with self.q_config_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
         except Exception:
             data = {}
-        open_q = data.get("open_questions", [])
-        yes_no_q = data.get("yes_no_questions", [])
+        mode_data = data.get(mode, {"description": "", "open_questions": [], "yes_no_questions": []})
+        open_q = mode_data.get("open_questions", [])
+        yes_no_q = mode_data.get("yes_no_questions", [])
 
         win = tk.Toplevel(self.app.root)
         win.title("编辑问题")
@@ -220,9 +246,15 @@ class AbstractTab:
         make_section(win, "是/否问题", yes_no_q)
 
         def save():
-            data = {"open_questions": open_q, "yes_no_questions": yes_no_q}
-            with path.open("w", encoding="utf-8") as f:
-                yaml.safe_dump(data, f, allow_unicode=True)
+            data[mode] = {
+                "description": mode_data.get("description", ""),
+                "open_questions": open_q,
+                "yes_no_questions": yes_no_q,
+            }
+            with self.q_config_path.open("w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.modes_data = data
+            self.mode_cb.configure(values=list(self.modes_data.keys()))
             win.destroy()
 
         ttk.Button(win, text="保存", command=save).pack(pady=5)

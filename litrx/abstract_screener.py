@@ -1,12 +1,12 @@
-import pandas as pd
+import json  # 用于解析JSON响应
 import os
 from pathlib import Path
-import openpyxl
+import sys  # 用于退出脚本
 import time
-import json # 用于解析JSON响应
-import sys # 用于退出脚本
 from typing import Any, Dict, Optional, Tuple
 
+import openpyxl
+import pandas as pd
 import yaml
 
 from .config import (
@@ -39,15 +39,26 @@ DEFAULT_CONFIG = {
 }
 
 
-def load_config(path: Optional[str] = None, questions_path: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Load module configuration and question templates."""
+def load_mode_questions(mode: str) -> Dict[str, Any]:
+    """Load questions for a given screening mode from questions_config.json."""
+
+    q_path = Path(__file__).resolve().parent.parent / "questions_config.json"
+    try:
+        with q_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get(mode, {"open_questions": [], "yes_no_questions": []})
+    except Exception:
+        return {"open_questions": [], "yes_no_questions": []}
+
+
+def load_config(path: Optional[str] = None, mode: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Load module configuration and questions for the given mode."""
 
     default_cfg = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
     config = base_load_config(str(path or default_cfg), DEFAULT_CONFIG)
 
-    q_path = questions_path or Path(__file__).resolve().parent.parent / "configs" / "questions" / "abstract.yaml"
-    with open(q_path, 'r', encoding='utf-8') as f:
-        questions = yaml.safe_load(f) or {}
+    mode = mode or config.get("CONFIG_MODE", "weekly_screening")
+    questions = load_mode_questions(mode)
 
     return config, questions
 
@@ -365,7 +376,13 @@ def run_gui():
 
     file_path_var = tk.StringVar()
     status_var = tk.StringVar()
-    mode_var = tk.StringVar(value=DEFAULT_CONFIG.get('CONFIG_MODE', 'weekly_screening'))
+    q_path = Path(__file__).resolve().parent.parent / "questions_config.json"
+    try:
+        with q_path.open("r", encoding="utf-8") as f:
+            mode_options = list(json.load(f).keys())
+    except Exception:
+        mode_options = ["weekly_screening"]
+    mode_var = tk.StringVar(value=mode_options[0] if mode_options else "")
     progress_var = tk.DoubleVar()
 
     def browse_file():
@@ -374,7 +391,7 @@ def run_gui():
             file_path_var.set(path)
 
     def process_file(path, mode):
-        config, questions = load_config()
+        config, questions = load_config(mode=mode)
         config['INPUT_FILE_PATH'] = path
         config['CONFIG_MODE'] = mode
         try:
@@ -412,7 +429,7 @@ def run_gui():
     config_frame = ttk.Frame(root)
     config_frame.pack(pady=10)
     ttk.Label(config_frame, text="筛选模式:").pack(side=tk.LEFT)
-    ttk.Combobox(config_frame, textvariable=mode_var, values=["weekly_screening", "specific_research"]).pack(side=tk.LEFT)
+    ttk.Combobox(config_frame, textvariable=mode_var, values=mode_options).pack(side=tk.LEFT)
 
     tk.Label(root, text="选择CSV/XLSX文件:").pack(pady=5)
     tk.Entry(root, textvariable=file_path_var, width=40).pack(padx=5)
