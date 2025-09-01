@@ -7,7 +7,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 ## Features
 
 - **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question. The GUI tab displays results in a sortable table, allows double-clicking to view full analyses, and can export the DataFrame.
-- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined in `configs/questions/abstract.yaml`. In the GUI, an **Edit Questions** dialog lets you adjust these prompts mid-run, a read-only log shows model summaries, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
+- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined per mode in `questions_config.json`. In the GUI, a dropdown selects the mode, an **Add Mode** button creates new presets, the **Edit Questions** dialog modifies questions, a read-only log shows model summaries, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results. The GUI tab lists selected PDFs with matched metadata and processing status, lets you set the research question, criteria, and output type, supports a metadata-only precheck, and can open the result folder when done.
 - **Modular tabbed GUI** – `python run_gui.py` (or `python -m litrx --gui`) launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening. The script auto-installs missing dependencies before starting.
 - **Flexible model support** – Choose between OpenAI or Gemini APIs, with model names and temperature easily customized in the scripts.
@@ -54,7 +54,7 @@ The base defaults for these values live in `configs/config.yaml`; edit this file
   litrx abstract            # command-line mode
   litrx abstract --gui      # graphical mode
   ```
-  Edit files in `configs/questions/` to change screening questions or column names.
+  Manage modes in `questions_config.json` or use the GUI's **Add Mode** and **Edit Questions** dialogs to customise prompts and output columns.
 - **PDF screening**
   ```bash
   litrx pdf --config path/to/config.yml --pdf-folder path/to/pdfs
@@ -64,7 +64,7 @@ The base defaults for these values live in `configs/config.yaml`; edit this file
 ## Customisation Tips
 
 - Modify default model names or temperature values at the top of the scripts.
-- Adjust the prompts in `csv_analyzer.py` or question sets in `configs/questions/` to collect different information.
+- Adjust the prompts in `csv_analyzer.py`, question sets in `questions_config.json` for abstract screening, or YAML files in `configs/questions/` for other workflows to collect different information.
 - Use `.env` or supply a config file to set API keys and other defaults.
 
 ## License

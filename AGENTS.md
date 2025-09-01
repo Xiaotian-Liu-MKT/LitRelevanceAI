@@ -8,7 +8,7 @@
 ## Project Overview
 LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers match a research topic. The `litrx` package offers:
 - **CSV relevance analysis** – scores Scopus exports from 0–100 with model-generated explanations.
-- **Abstract screening** – applies configurable yes/no criteria and open questions to titles and abstracts.
+- **Abstract screening** – applies configurable yes/no criteria and open questions to titles and abstracts. Modes are loaded from `questions_config.json` so weekly and custom presets can be edited in the GUI.
 - **PDF screening** – converts PDFs to text and checks them against research questions and detailed criteria.
 - **Modular GUI** – a Tkinter application with dedicated tabs for CSV analysis, abstract screening, and PDF screening.
 
@@ -29,7 +29,7 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
   - `config.yaml` – baseline API configuration
   - `questions/*.yaml` – prompts for CSV, abstract, and PDF workflows
 - `run_gui.py` – installs missing dependencies and launches the GUI
-- `questions_config.json` – sample question presets
+- `questions_config.json` – mode-aware question presets for abstract screening; the GUI reads and writes to this file
 - `README.md`, `Chinese_README.md` – project documentation
 - `pyproject.toml`, `setup.cfg` – packaging metadata
 
