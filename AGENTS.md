@@ -9,6 +9,7 @@
 - Prefer `rg` for searching the repository.
 - Keep documentation in both `README.md` and `Chinese_README.md` up to date with any CLI or packaging changes.
 - Use the shared `config` and `AIClient` utilities instead of reimplementing configuration loading or model calls.
+- GUI configuration loads defaults from `configs/config.yaml`, then merges `~/.litrx_gui.yaml` (written by the **Save Config** button) and `.env` in that order of priority.
 - When modifying the GUI, use `BaseWindow` for shared controls and add new tabs under `litrx/gui/tabs/`, registering them with `LitRxApp`.
 - The CSV analysis tab renders results in a `ttk.Treeview` with title, relevance, and analysis columns, supports exporting results, and opens full analyses on double-click.
 - The abstract screening tab loads questions from `configs/questions/abstract.yaml`, provides an editor for yes/no and open questions, logs model summaries in a read-only area, allows cancelling with a stop button, and exports the DataFrame to CSV or Excel.

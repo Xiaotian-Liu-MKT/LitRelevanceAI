@@ -44,6 +44,8 @@ All commands merge `.env` values with an optional JSON or YAML file passed via `
 
 When running the GUI, a **Save Config** button writes the current `AI_SERVICE`, `MODEL_NAME`, `API_BASE` and API keys to `~/.litrx_gui.yaml`. On startup the application loads `configs/config.yaml`, the saved file, and `.env` in order of increasing priority (`~/.litrx_gui.yaml` < `.env` < runtime input), so your saved preferences populate the interface automatically.
 
+The base defaults for these values live in `configs/config.yaml`; edit this file if you need to change the starting GUI settings before saving.
+
 ## Advanced Tools
 
 - **Abstract screening**
