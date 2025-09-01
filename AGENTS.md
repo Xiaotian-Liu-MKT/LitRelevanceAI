@@ -10,7 +10,7 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
 - **CSV relevance analysis** – scores Scopus exports from 0–100 with model-generated explanations.
 - **Abstract screening** – applies configurable yes/no criteria and open questions to titles and abstracts. Modes are loaded from `questions_config.json` so weekly and custom presets can be edited in the GUI.
 - **PDF screening** – converts PDFs to text and checks them against research questions and detailed criteria.
-- **Modular GUI** – a Tkinter application with dedicated tabs for CSV analysis, abstract screening, and PDF screening.
+- **Modular GUI** – a Tkinter application with dedicated tabs for CSV analysis, abstract screening, and PDF screening. A settings dropdown switches between OpenAI and Gemini and remembers API keys for each provider.
 
 ## Repository Structure
 - `litrx/` – core package
@@ -78,7 +78,7 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
 - **Security** – keep API keys out of source control; rely on environment variables.
 - **Performance** – respect `API_REQUEST_DELAY` when batching model calls; process large datasets incrementally.
 - **Compatibility** – `AIClient` abstracts OpenAI and Gemini; use cross-platform paths and avoid OS-specific assumptions.
-- **GUI** – add new tabs under `litrx/gui/tabs/` and register them in `LitRxApp`.
+- **GUI** – add new tabs under `litrx/gui/tabs/` and register them in `LitRxApp`. The base window's service selector toggles between OpenAI and Gemini; ensure the API key field and config saving remain provider-specific.
 
 ## Examples and FAQ
 ### Quick CSV Analysis
