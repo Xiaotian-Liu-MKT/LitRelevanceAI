@@ -46,8 +46,6 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-    
-"""
 from litrx.gui.main_window import launch_gui
 
 
