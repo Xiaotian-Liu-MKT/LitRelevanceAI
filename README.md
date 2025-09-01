@@ -9,7 +9,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 - **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question. The GUI tab displays results in a sortable table, allows double-clicking to view full analyses, and can export the DataFrame.
 - **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined in `configs/questions/abstract.yaml`. In the GUI, an **Edit Questions** dialog lets you adjust these prompts mid-run, a read-only log shows model summaries, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results. The GUI tab lists selected PDFs with matched metadata and processing status, lets you set the research question, criteria, and output type, supports a metadata-only precheck, and can open the result folder when done.
-- **Modular tabbed GUI** – `python -m litrx --gui` launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening.
+- **Modular tabbed GUI** – `python run_gui.py` (or `python -m litrx --gui`) launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening.
 - **Flexible model support** – Choose between OpenAI or Gemini APIs, with model names and temperature easily customized in the scripts.
 - **Unified configuration** – `.env` values merge with JSON or YAML config files, and command-line options override the resulting `DEFAULT_CONFIG`.
 - **Automatic saving** – Interim and final results are written to CSV/XLSX files with timestamps so you never lose progress.
@@ -34,7 +34,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
    (or `python -m litrx csv` if the `litrx` command is unavailable)
    For a graphical interface, run:
    ```bash
-   python -m litrx --gui
+   python run_gui.py
    ```
 3. Follow the prompts to choose API provider, enter your research topic, and supply the CSV path. Results are saved beside the input file.
 
