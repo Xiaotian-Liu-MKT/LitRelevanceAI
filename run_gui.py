@@ -2,7 +2,7 @@
 
 Run:
     python run_gui.py
-
+    
 The script checks for required packages and installs them if missing.
 """
 
@@ -45,3 +45,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+    
+"""
+from litrx.gui.main_window import launch_gui
+
+
+if __name__ == "__main__":
+    launch_gui()
