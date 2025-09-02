@@ -116,8 +116,10 @@ def load_and_validate_data(file_path, config):
 def prepare_dataframe(df, open_questions, yes_no_questions):
     for q in open_questions:
         df[q['column_name']] = ''
+        df[f"{q['column_name']}_verified"] = ''
     for q in yes_no_questions:
         df[q['column_name']] = ''
+        df[f"{q['column_name']}_verified"] = ''
     return df
 
 def construct_ai_prompt(title, abstract, research_question, screening_criteria, detailed_analysis_questions):
@@ -211,6 +213,28 @@ def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_
 
 
 def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
+    """Parse an AI JSON string into quick analysis and screening results.
+
+    The model is expected to return a structure containing ``quick_analysis`` and
+    ``screening_results`` sections.  When verifying previous answers, the model
+    may wrap these sections inside ``verification_results``.  Missing entries are
+    populated with a default "AI未提供此项信息或解析失败" message to simplify
+    downstream logic.
+
+    Parameters
+    ----------
+    ai_json_string:
+        Raw JSON string returned by the model.
+    open_questions / yes_no_questions:
+        Question metadata used to align model keys with dataframe columns.
+
+    Returns
+    -------
+    dict
+        Normalised dictionary with ``quick_analysis`` and ``screening_results``
+        subsections.
+    """
+
     final_structure = {
         "quick_analysis": {q['key']: "AI未提供此项信息或解析失败" for q in open_questions},
         "screening_results": {q['key']: "AI未提供此项信息或解析失败" for q in yes_no_questions}
@@ -222,6 +246,9 @@ def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
             return final_structure
 
         data = json.loads(ai_json_string)
+
+        if "verification_results" in data:
+            data = data.get("verification_results", {})
 
         qa = data.get("quick_analysis", {})
         sr = data.get("screening_results", {})
@@ -238,6 +265,63 @@ def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
         print(f"解析AI响应时发生未知错误: {e}")
 
     return final_structure
+
+
+def verify_ai_response(title, abstract, initial_json, client, open_questions, yes_no_questions):
+    """Verify that AI answers are supported by the supplied title and abstract.
+
+    The function sends the model a summary of its previous answers and asks it
+    to confirm whether each one is backed by the source text.  The model should
+    respond with "是", "否" or "不确定" for each question.  The parsed results are
+    returned in the same structure as ``parse_ai_response_json``.
+    """
+
+    verification_data = {
+        "quick_analysis": {
+            q["key"]: {
+                "question": q["question"],
+                "answer": initial_json.get("quick_analysis", {}).get(q["key"], "")
+            }
+            for q in open_questions
+        },
+        "screening_results": {
+            q["key"]: {
+                "question": q["question"],
+                "answer": initial_json.get("screening_results", {}).get(q["key"], "")
+            }
+            for q in yes_no_questions
+        },
+    }
+
+    prompt = (
+        "请根据以下文献标题和摘要，核对AI之前的回答是否与文献内容一致。\n"
+        f"文献标题：{title}\n"
+        f"文献摘要：{abstract}\n\n"
+        "问题与AI初始回答如下：\n"
+        f"{json.dumps(verification_data, ensure_ascii=False, indent=2)}\n\n"
+        "请判断每个回答是否得到标题或摘要支持。如支持回答\"是\"，不支持回答\"否\"，无法判断回答\"不确定\"。"
+        "请按如下JSON格式返回：\n"
+        "{\n    \"quick_analysis\": {" +
+        ", ".join([f'\"{q["key"]}\": \"\"' for q in open_questions]) +
+        "},\n    \"screening_results\": {" +
+        ", ".join([f'\"{q["key"]}\": \"\"' for q in yes_no_questions]) +
+        "}\n}"
+    )
+
+    try:
+        response = client.request(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        content = response["choices"][0]["message"]["content"].strip()
+        return parse_ai_response_json(content, open_questions, yes_no_questions)
+    except Exception as e:
+        print(f"验证AI响应失败: {e}")
+        return {
+            "quick_analysis": {q["key"]: "验证失败" for q in open_questions},
+            "screening_results": {q["key"]: "验证失败" for q in yes_no_questions},
+        }
 
 
 def save_progress(df, output_path, current_index):
@@ -302,7 +386,16 @@ def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes
     for q in yes_no_questions:
         df.at[index, q['column_name']] = sr.get(q['key'], "信息缺失")
 
-    return parsed_data
+    verification = verify_ai_response(title, abstract, parsed_data, client, open_questions, yes_no_questions)
+    vqa = verification.get('quick_analysis', {})
+    for q in open_questions:
+        df.at[index, f"{q['column_name']}_verified"] = vqa.get(q['key'], "验证失败")
+
+    vsr = verification.get('screening_results', {})
+    for q in yes_no_questions:
+        df.at[index, f"{q['column_name']}_verified"] = vsr.get(q['key'], "验证失败")
+
+    return {"initial": parsed_data, "verification": verification}
 
 
 # --- 主程序 ---
