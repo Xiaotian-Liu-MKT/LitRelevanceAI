@@ -59,6 +59,8 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
    ```
    The first run installs any missing packages.
 
+- When introducing new dependencies or feature switches, extend this section with their installation commands and document related tests in "Testing and Validation".
+
 ## Testing and Validation
 - Always run the following before committing:
   ```bash
@@ -67,6 +69,7 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
   pytest
   ```
 - Add unit tests for new functionality. The current suite may be empty; future tests should cover CLI and core utilities.
+- Document tests for any new dependencies or configuration switches added to the project.
 
 ## Collaboration and Compliance
 - Use feature branches and keep commits focused; prefix messages with `feat:`, `fix:`, `docs:`, etc.
@@ -79,6 +82,8 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
 - **Performance** – respect `API_REQUEST_DELAY` when batching model calls; process large datasets incrementally.
 - **Compatibility** – `AIClient` abstracts OpenAI and Gemini; use cross-platform paths and avoid OS-specific assumptions.
 - **GUI** – add new tabs under `litrx/gui/tabs/` and register them in `LitRxApp`. The base window's service selector toggles between OpenAI and Gemini; ensure the API key field and config saving remain provider-specific.
+- **Validation** – the verification workflow cross-checks model outputs with source text to confirm screening decisions and highlight unsupported answers.
+- **Abstract screening sync** – when modifying summary-filtering logic or `abstract_screener.py`, update `README.md`, `Chinese_README.md`, and GUI prompts to keep documentation aligned.
 
 ## Examples and FAQ
 ### Quick CSV Analysis
