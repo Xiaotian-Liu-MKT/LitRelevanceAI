@@ -7,7 +7,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 ## Features
 
 - **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question. The GUI tab displays results in a sortable table, allows double-clicking to view full analyses, and can export the DataFrame.
-- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined per mode in `questions_config.json`. Answers can be rechecked against the source text (toggle with the `ENABLE_VERIFICATION` config or GUI “启用验证” checkbox) and results are written to matching `<column>_verified` fields. In the GUI, a dropdown selects the mode, an **Add Mode** button creates new presets, the **Edit Questions** dialog modifies questions, a read-only log shows model summaries with ✔/✖ markers, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
+- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined per mode in `questions_config.json`. Each AI answer can undergo a second model check that confirms whether the title or abstract supports it. Enable or disable this via the `ENABLE_VERIFICATION` config flag or the GUI's “Enable verification” checkbox. Verification results populate `<column>_verified` fields (“supported/unsupported” or “未验证” when turned off), and the GUI log annotates summaries with ✔/✖ markers. A dropdown selects the mode, an **Add Mode** button creates new presets, the **Edit Questions** dialog modifies questions, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results. The GUI tab lists selected PDFs with matched metadata and processing status, lets you set the research question, criteria, and output type, supports a metadata-only precheck, and can open the result folder when done.
 - **Modular tabbed GUI** – `python run_gui.py` (or `python -m litrx --gui`) launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening. The script auto-installs missing dependencies before starting.
 - **Flexible model support** – A settings dropdown lets you switch between OpenAI and Gemini. The API key field updates to match the chosen provider and remembers previously entered keys, while model names and temperature remain customizable in the scripts.
@@ -54,17 +54,17 @@ The base defaults for these values live in `configs/config.yaml`; edit this file
   litrx abstract            # command-line mode
   litrx abstract --gui      # graphical mode
   ```
- Manage modes in `questions_config.json` or use the GUI's **Add Mode** and **Edit Questions** dialogs to customise prompts and output columns. The resulting DataFrame includes `<column>` for each question and `<column>_verified` to show whether the AI's answer is supported by the title or abstract (or “未验证” when verification is disabled). The GUI log summarises answers with ✔/✖ markers when verification is on.
+Manage modes in `questions_config.json` or use the GUI's **Add Mode** and **Edit Questions** dialogs to customise prompts and output columns. Toggle secondary verification by setting `ENABLE_VERIFICATION=true` or `false` in your config (or `.env`), or by checking/unchecking **Enable verification** in the GUI. The resulting DataFrame includes `<column>` for each question and `<column>_verified` to show whether the AI's answer is supported by the title or abstract (or “未验证” when verification is disabled). The GUI log summarises answers with ✔/✖ markers when verification is on.
 - **PDF screening**
   ```bash
   litrx pdf --config path/to/config.yml --pdf-folder path/to/pdfs
   ```
-  The JSON or YAML config specifies research questions, screening criteria and output type. In the GUI, you can also supply an optional metadata file, run a metadata-only precheck without model calls, and open the result folder when processing completes. Question templates default to the YAML files in `configs/questions/`.
+  The JSON or YAML config specifies research questions, screening criteria and output type. In the GUI, you can also supply an optional metadata file, run a metadata-only precheck without model calls, and open the result folder when processing completes. All question templates, including PDF screening criteria, are managed via `questions_config.json`.
 
 ## Customisation Tips
 
 - Modify default model names or temperature values at the top of the scripts.
-- Adjust the prompts in `csv_analyzer.py`, question sets in `questions_config.json` for abstract screening, or YAML files in `configs/questions/` for other workflows to collect different information.
+- Adjust the prompts in `csv_analyzer.py` or the question sets in `questions_config.json` to collect different information.
 - Use `.env` or supply a config file to set API keys and other defaults.
 
 ## License
