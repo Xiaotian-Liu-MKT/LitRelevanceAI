@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
 
     # 其他配置
     'API_REQUEST_DELAY': 1,
+    'ENABLE_VERIFICATION': True,
     'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题'],
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
@@ -386,14 +387,21 @@ def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes
     for q in yes_no_questions:
         df.at[index, q['column_name']] = sr.get(q['key'], "信息缺失")
 
-    verification = verify_ai_response(title, abstract, parsed_data, client, open_questions, yes_no_questions)
-    vqa = verification.get('quick_analysis', {})
-    for q in open_questions:
-        df.at[index, f"{q['column_name']}_verified"] = vqa.get(q['key'], "验证失败")
+    verification = {}
+    if config.get('ENABLE_VERIFICATION', True):
+        verification = verify_ai_response(title, abstract, parsed_data, client, open_questions, yes_no_questions)
+        vqa = verification.get('quick_analysis', {})
+        for q in open_questions:
+            df.at[index, f"{q['column_name']}_verified"] = vqa.get(q['key'], "验证失败")
 
-    vsr = verification.get('screening_results', {})
-    for q in yes_no_questions:
-        df.at[index, f"{q['column_name']}_verified"] = vsr.get(q['key'], "验证失败")
+        vsr = verification.get('screening_results', {})
+        for q in yes_no_questions:
+            df.at[index, f"{q['column_name']}_verified"] = vsr.get(q['key'], "验证失败")
+    else:
+        for q in open_questions:
+            df.at[index, f"{q['column_name']}_verified"] = '未验证'
+        for q in yes_no_questions:
+            df.at[index, f"{q['column_name']}_verified"] = '未验证'
 
     return {"initial": parsed_data, "verification": verification}
 

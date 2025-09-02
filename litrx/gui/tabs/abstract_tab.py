@@ -59,6 +59,9 @@ class AbstractTab:
         ttk.Button(mode_frame, text="添加模式", command=self.add_mode).pack(side=tk.LEFT, padx=5)
         self.q_config_path = q_path
 
+        self.verify_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text="启用验证", variable=self.verify_var).pack(anchor=tk.W, padx=5, pady=(5, 0))
+
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=5)
         ttk.Button(btn_frame, text="开始筛选", command=self.start_screen).pack(side=tk.LEFT, padx=5)
@@ -106,6 +109,7 @@ class AbstractTab:
         config.update(self.app.build_config())
         config["INPUT_FILE_PATH"] = path
         config["CONFIG_MODE"] = mode
+        config["ENABLE_VERIFICATION"] = self.verify_var.get()
         try:
             client = AIClient(config)
             q = load_mode_questions(mode)
@@ -121,10 +125,30 @@ class AbstractTab:
                     break
                 self.app.root.after(0, self.status.set, f"处理中: {index + 1}/{total}")
                 self.app.root.after(0, self.progress.set, (index + 1) / total * 100)
-                parsed = analyze_article(df, index, row, title_col, abstract_col, open_q, yes_no_q, config, client)
-                qa = parsed.get("quick_analysis", {}) if parsed else {}
-                sr = parsed.get("screening_results", {}) if parsed else {}
-                summary_parts = [f"{k}:{v}" for k, v in {**qa, **sr}.items()]
+                result = analyze_article(df, index, row, title_col, abstract_col, open_q, yes_no_q, config, client)
+                initial = result.get("initial", {}) if result else {}
+                verification = result.get("verification", {}) if result else {}
+                qa = initial.get("quick_analysis", {})
+                sr = initial.get("screening_results", {})
+                vqa = verification.get("quick_analysis", {})
+                vsr = verification.get("screening_results", {})
+                summary_parts = []
+                for q in open_q:
+                    key = q["key"]
+                    ans = qa.get(key, "")
+                    mark = ""
+                    if config.get("ENABLE_VERIFICATION", True):
+                        ver = vqa.get(key, "")
+                        mark = "✔" if ver == "是" else "✖" if ver == "否" else "?" if ver else ""
+                    summary_parts.append(f"{key}:{ans}{(' ' + mark) if mark else ''}")
+                for q in yes_no_q:
+                    key = q["key"]
+                    ans = sr.get(key, "")
+                    mark = ""
+                    if config.get("ENABLE_VERIFICATION", True):
+                        ver = vsr.get(key, "")
+                        mark = "✔" if ver == "是" else "✖" if ver == "否" else "?" if ver else ""
+                    summary_parts.append(f"{key}:{ans}{(' ' + mark) if mark else ''}")
                 self.app.root.after(0, self._log, f"条目 {index + 1}: {'; '.join(summary_parts)}")
             else:
                 base, ext = os.path.splitext(path)
