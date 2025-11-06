@@ -253,6 +253,54 @@ class AbstractTab:
                 items.append({"key": key, "question": question, "column_name": column})
                 lb.insert(tk.END, question)
 
+            def edit_item():
+                sel = lb.curselection()
+                if not sel:
+                    messagebox.showwarning("提示", "请先选择一个问题")
+                    return
+                idx = sel[0]
+                item = items[idx]
+                key = simpledialog.askstring(
+                    "键",
+                    "Key:",
+                    initialvalue=item.get("key", ""),
+                    parent=win,
+                )
+                if key is None:
+                    return
+                key = key.strip()
+                if not key:
+                    messagebox.showerror("错误", "Key 不能为空")
+                    return
+                question = simpledialog.askstring(
+                    "问题",
+                    "Question:",
+                    initialvalue=item.get("question", ""),
+                    parent=win,
+                )
+                if question is None:
+                    return
+                question = question.strip()
+                if not question:
+                    messagebox.showerror("错误", "Question 不能为空")
+                    return
+                column = simpledialog.askstring(
+                    "列名",
+                    "Column Name:",
+                    initialvalue=item.get("column_name", ""),
+                    parent=win,
+                )
+                if column is None:
+                    return
+                column = column.strip()
+                if not column:
+                    messagebox.showerror("错误", "Column Name 不能为空")
+                    return
+                items[idx] = {"key": key, "question": question, "column_name": column}
+                lb.delete(idx)
+                lb.insert(idx, question)
+                lb.selection_set(idx)
+
             def del_item():
                 sel = lb.curselection()
                 if sel:
@@ -263,7 +311,9 @@ class AbstractTab:
             btn_f = ttk.Frame(frame)
             btn_f.pack(pady=5)
             ttk.Button(btn_f, text="添加", command=add_item).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_f, text="编辑", command=edit_item).pack(side=tk.LEFT, padx=5)
             ttk.Button(btn_f, text="删除", command=del_item).pack(side=tk.LEFT, padx=5)
+            lb.bind("<Double-Button-1>", lambda _event: edit_item())
             return frame
 
         make_section(win, "开放问题", open_q)
