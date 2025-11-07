@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from copy import deepcopy
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -232,6 +233,64 @@ class AbstractTab:
         win.title("编辑问题")
         win.geometry("600x400")
 
+        def prompt_question(initial: Optional[dict[str, str]] = None) -> Optional[dict[str, str]]:
+            dialog = tk.Toplevel(win)
+            dialog.title("设置问题")
+            dialog.transient(win)
+            dialog.grab_set()
+            dialog.resizable(True, True)
+            dialog.geometry("400x320")
+
+            ttk.Label(dialog, text="Key:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=(10, 5))
+            key_var = tk.StringVar(value=(initial or {}).get("key", ""))
+            key_entry = ttk.Entry(dialog, textvariable=key_var)
+            key_entry.grid(row=0, column=1, sticky=tk.EW, padx=(0, 10), pady=(10, 5))
+
+            ttk.Label(dialog, text="Column Name:").grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
+            column_var = tk.StringVar(value=(initial or {}).get("column_name", ""))
+            column_entry = ttk.Entry(dialog, textvariable=column_var)
+            column_entry.grid(row=1, column=1, sticky=tk.EW, padx=(0, 10), pady=5)
+
+            ttk.Label(dialog, text="Question:").grid(row=2, column=0, sticky=tk.NW, padx=10, pady=5)
+            question_text = tk.Text(dialog, wrap=tk.WORD)
+            question_text.grid(row=2, column=1, sticky=tk.NSEW, padx=(0, 10), pady=5)
+            question_text.insert("1.0", (initial or {}).get("question", ""))
+
+            button_frame = ttk.Frame(dialog)
+            button_frame.grid(row=3, column=0, columnspan=2, pady=10)
+
+            result: Optional[dict[str, str]] = None
+
+            def on_save() -> None:
+                nonlocal result
+                key = key_var.get().strip()
+                column_name = column_var.get().strip()
+                question = question_text.get("1.0", tk.END).strip()
+                if not key:
+                    messagebox.showerror("错误", "Key 不能为空", parent=dialog)
+                    return
+                if not question:
+                    messagebox.showerror("错误", "Question 不能为空", parent=dialog)
+                    return
+                if not column_name:
+                    messagebox.showerror("错误", "Column Name 不能为空", parent=dialog)
+                    return
+                result = {"key": key, "question": question, "column_name": column_name}
+                dialog.destroy()
+
+            def on_cancel() -> None:
+                dialog.destroy()
+
+            ttk.Button(button_frame, text="保存", command=on_save).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="取消", command=on_cancel).pack(side=tk.LEFT, padx=5)
+
+            dialog.columnconfigure(1, weight=1)
+            dialog.rowconfigure(2, weight=1)
+            dialog.protocol("WM_DELETE_WINDOW", on_cancel)
+            key_entry.focus_set()
+            win.wait_window(dialog)
+            return result
+
         def make_section(parent, title, items):
             frame = ttk.LabelFrame(parent, text=title)
             frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -241,17 +300,28 @@ class AbstractTab:
                 lb.insert(tk.END, q["question"])
 
             def add_item():
-                key = simpledialog.askstring("键", "Key:", parent=win)
-                if not key:
+                new_item = prompt_question()
+                if not new_item:
                     return
-                question = simpledialog.askstring("问题", "Question:", parent=win)
-                if not question:
+                items.append(new_item)
+                lb.insert(tk.END, new_item["question"])
+
+            def edit_item():
+                sel = lb.curselection()
+                if not sel:
+                    messagebox.showwarning("提示", "请先选择一个问题")
                     return
-                column = simpledialog.askstring("列名", "Column Name:", parent=win)
-                if not column:
+                idx = sel[0]
+                item = items[idx]
+                updated_item = prompt_question(item)
+                if not updated_item:
                     return
-                items.append({"key": key, "question": question, "column_name": column})
-                lb.insert(tk.END, question)
+                # 保留原有字典对象，避免其他引用失效
+                item.clear()
+                item.update(updated_item)
+                lb.delete(idx)
+                lb.insert(idx, updated_item["question"])
+                lb.selection_set(idx)
 
             def del_item():
                 sel = lb.curselection()
@@ -263,22 +333,35 @@ class AbstractTab:
             btn_f = ttk.Frame(frame)
             btn_f.pack(pady=5)
             ttk.Button(btn_f, text="添加", command=add_item).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_f, text="编辑", command=edit_item).pack(side=tk.LEFT, padx=5)
             ttk.Button(btn_f, text="删除", command=del_item).pack(side=tk.LEFT, padx=5)
+            lb.bind("<Double-Button-1>", lambda _event: edit_item())
             return frame
 
         make_section(win, "开放问题", open_q)
         make_section(win, "是/否问题", yes_no_q)
 
         def save():
-            data[mode] = {
-                "description": mode_data.get("description", ""),
-                "open_questions": open_q,
-                "yes_no_questions": yes_no_q,
-            }
-            with self.q_config_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            if not mode:
+                messagebox.showerror("错误", "请先选择一个模式后再保存。", parent=win)
+                return
+
+            updated_mode = dict(mode_data)
+            updated_mode["open_questions"] = deepcopy(open_q)
+            updated_mode["yes_no_questions"] = deepcopy(yes_no_q)
+
+            data[mode] = updated_mode
+            try:
+                with self.q_config_path.open("w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except OSError as exc:
+                messagebox.showerror("错误", f"保存问题配置失败: {exc}", parent=win)
+                return
+
             self.modes_data = data
             self.mode_cb.configure(values=list(self.modes_data.keys()))
+            self.mode_var.set(mode)
+            messagebox.showinfo("成功", "问题配置已保存。", parent=win)
             win.destroy()
 
         ttk.Button(win, text="保存", command=save).pack(pady=5)
