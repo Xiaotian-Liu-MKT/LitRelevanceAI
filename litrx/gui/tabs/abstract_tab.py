@@ -296,6 +296,64 @@ class AbstractTab:
             win.wait_window(dialog)
             return result
 
+        def prompt_question(initial: Optional[dict[str, str]] = None) -> Optional[dict[str, str]]:
+            dialog = tk.Toplevel(win)
+            dialog.title("设置问题")
+            dialog.transient(win)
+            dialog.grab_set()
+            dialog.resizable(True, True)
+            dialog.geometry("400x320")
+
+            ttk.Label(dialog, text="Key:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=(10, 5))
+            key_var = tk.StringVar(value=(initial or {}).get("key", ""))
+            key_entry = ttk.Entry(dialog, textvariable=key_var)
+            key_entry.grid(row=0, column=1, sticky=tk.EW, padx=(0, 10), pady=(10, 5))
+
+            ttk.Label(dialog, text="Column Name:").grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
+            column_var = tk.StringVar(value=(initial or {}).get("column_name", ""))
+            column_entry = ttk.Entry(dialog, textvariable=column_var)
+            column_entry.grid(row=1, column=1, sticky=tk.EW, padx=(0, 10), pady=5)
+
+            ttk.Label(dialog, text="Question:").grid(row=2, column=0, sticky=tk.NW, padx=10, pady=5)
+            question_text = tk.Text(dialog, wrap=tk.WORD)
+            question_text.grid(row=2, column=1, sticky=tk.NSEW, padx=(0, 10), pady=5)
+            question_text.insert("1.0", (initial or {}).get("question", ""))
+
+            button_frame = ttk.Frame(dialog)
+            button_frame.grid(row=3, column=0, columnspan=2, pady=10)
+
+            result: Optional[dict[str, str]] = None
+
+            def on_save() -> None:
+                nonlocal result
+                key = key_var.get().strip()
+                column_name = column_var.get().strip()
+                question = question_text.get("1.0", tk.END).strip()
+                if not key:
+                    messagebox.showerror("错误", "Key 不能为空", parent=dialog)
+                    return
+                if not question:
+                    messagebox.showerror("错误", "Question 不能为空", parent=dialog)
+                    return
+                if not column_name:
+                    messagebox.showerror("错误", "Column Name 不能为空", parent=dialog)
+                    return
+                result = {"key": key, "question": question, "column_name": column_name}
+                dialog.destroy()
+
+            def on_cancel() -> None:
+                dialog.destroy()
+
+            ttk.Button(button_frame, text="保存", command=on_save).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="取消", command=on_cancel).pack(side=tk.LEFT, padx=5)
+
+            dialog.columnconfigure(1, weight=1)
+            dialog.rowconfigure(2, weight=1)
+            dialog.protocol("WM_DELETE_WINDOW", on_cancel)
+            key_entry.focus_set()
+            win.wait_window(dialog)
+            return result
+
         def make_section(parent, title, items):
             frame = ttk.LabelFrame(parent, text=title)
             frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
