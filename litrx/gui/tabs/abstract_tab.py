@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from copy import deepcopy
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -315,57 +316,11 @@ class AbstractTab:
                 updated_item = prompt_question(item)
                 if not updated_item:
                     return
-                items[idx] = updated_item
+                # 保留原有字典对象，避免其他引用失效
+                item.clear()
+                item.update(updated_item)
                 lb.delete(idx)
                 lb.insert(idx, updated_item["question"])
-                lb.selection_set(idx)
-
-            def edit_item():
-                sel = lb.curselection()
-                if not sel:
-                    messagebox.showwarning("提示", "请先选择一个问题")
-                    return
-                idx = sel[0]
-                item = items[idx]
-                key = simpledialog.askstring(
-                    "键",
-                    "Key:",
-                    initialvalue=item.get("key", ""),
-                    parent=win,
-                )
-                if key is None:
-                    return
-                key = key.strip()
-                if not key:
-                    messagebox.showerror("错误", "Key 不能为空")
-                    return
-                question = simpledialog.askstring(
-                    "问题",
-                    "Question:",
-                    initialvalue=item.get("question", ""),
-                    parent=win,
-                )
-                if question is None:
-                    return
-                question = question.strip()
-                if not question:
-                    messagebox.showerror("错误", "Question 不能为空")
-                    return
-                column = simpledialog.askstring(
-                    "列名",
-                    "Column Name:",
-                    initialvalue=item.get("column_name", ""),
-                    parent=win,
-                )
-                if column is None:
-                    return
-                column = column.strip()
-                if not column:
-                    messagebox.showerror("错误", "Column Name 不能为空")
-                    return
-                items[idx] = {"key": key, "question": question, "column_name": column}
-                lb.delete(idx)
-                lb.insert(idx, question)
                 lb.selection_set(idx)
 
             def del_item():
@@ -387,15 +342,26 @@ class AbstractTab:
         make_section(win, "是/否问题", yes_no_q)
 
         def save():
-            data[mode] = {
-                "description": mode_data.get("description", ""),
-                "open_questions": open_q,
-                "yes_no_questions": yes_no_q,
-            }
-            with self.q_config_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            if not mode:
+                messagebox.showerror("错误", "请先选择一个模式后再保存。", parent=win)
+                return
+
+            updated_mode = dict(mode_data)
+            updated_mode["open_questions"] = deepcopy(open_q)
+            updated_mode["yes_no_questions"] = deepcopy(yes_no_q)
+
+            data[mode] = updated_mode
+            try:
+                with self.q_config_path.open("w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except OSError as exc:
+                messagebox.showerror("错误", f"保存问题配置失败: {exc}", parent=win)
+                return
+
             self.modes_data = data
             self.mode_cb.configure(values=list(self.modes_data.keys()))
+            self.mode_var.set(mode)
+            messagebox.showinfo("成功", "问题配置已保存。", parent=win)
             win.destroy()
 
         ttk.Button(win, text="保存", command=save).pack(pady=5)
