@@ -7,7 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import pandas as pd
 
@@ -122,10 +122,10 @@ class AbstractTab:
             total = len(df)
             for index, row in df.iterrows():
                 if self.stop_event.is_set():
-                    self.app.root.after(0, self._log, "任务已中止")
+                    self._schedule(self._log, "任务已中止")
                     break
-                self.app.root.after(0, self.status.set, f"处理中: {index + 1}/{total}")
-                self.app.root.after(0, self.progress.set, (index + 1) / total * 100)
+                self._schedule(self.status.set, f"处理中: {index + 1}/{total}")
+                self._schedule(self.progress.set, (index + 1) / total * 100)
                 result = analyze_article(df, index, row, title_col, abstract_col, open_q, yes_no_q, config, client)
                 initial = result.get("initial", {}) if result else {}
                 verification = result.get("verification", {}) if result else {}
@@ -150,7 +150,7 @@ class AbstractTab:
                         ver = vsr.get(key, "")
                         mark = "✔" if ver == "是" else "✖" if ver == "否" else "?" if ver else ""
                     summary_parts.append(f"{key}:{ans}{(' ' + mark) if mark else ''}")
-                self.app.root.after(0, self._log, f"条目 {index + 1}: {'; '.join(summary_parts)}")
+                self._schedule(self._log, f"条目 {index + 1}: {'; '.join(summary_parts)}")
             else:
                 base, ext = os.path.splitext(path)
                 output_file_path = f"{base}{config['OUTPUT_FILE_SUFFIX']}{ext}"
@@ -158,14 +158,14 @@ class AbstractTab:
                     df.to_csv(output_file_path, index=False, encoding='utf-8-sig')
                 else:
                     df.to_excel(output_file_path, index=False, engine='openpyxl')
-                self.app.root.after(0, self._log, f"完成! 结果已保存到: {output_file_path}")
+                self._schedule(self._log, f"完成! 结果已保存到: {output_file_path}")
         except Exception as e:  # pragma: no cover
-            self.app.root.after(0, self._log, f"错误: {e}")
+            self._schedule(self._log, f"错误: {e}")
         finally:
-            self.app.root.after(0, self.status.set, "")
-            self.app.root.after(0, self.progress.set, 0)
-            self.app.root.after(0, lambda: self.stop_btn.config(state=tk.DISABLED))
-            self.app.root.after(0, lambda: self.enable_exports(self.df is not None))
+            self._schedule(self.status.set, "")
+            self._schedule(self.progress.set, 0)
+            self._schedule(lambda: self.stop_btn.config(state=tk.DISABLED))
+            self._schedule(lambda: self.enable_exports(self.df is not None))
 
     # ------------------------------------------------------------------
     # Utilities
@@ -180,6 +180,17 @@ class AbstractTab:
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
+
+    def _schedule(self, callback: Callable, *args) -> None:
+        """Safely schedule a Tk update from worker threads."""
+
+        root = getattr(self.app, "root", None)
+        if root is None:
+            return
+        try:
+            root.after(0, callback, *args)
+        except (RuntimeError, tk.TclError):  # pragma: no cover - GUI lifecycle
+            pass
 
     def enable_exports(self, enable: bool) -> None:
         state = tk.NORMAL if enable else tk.DISABLED
