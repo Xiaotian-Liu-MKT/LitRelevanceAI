@@ -7,6 +7,7 @@ from tkinter.scrolledtext import ScrolledText
 from typing import Dict
 
 from ..config import DEFAULT_CONFIG as BASE_CONFIG, load_config, load_env_file
+from ..i18n import get_i18n, t
 
 try:  # pragma: no cover - optional dependency
     import yaml
@@ -25,18 +26,25 @@ class BaseWindow:
 
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("LitRx Toolkit - AI文献分析工具")
-        self.root.geometry("1000x700")
 
-        # Configure modern styling
-        self.setup_styles()
-
+        # Initialize i18n and load saved language preference
         repo_root = Path(__file__).resolve().parents[2]
         config_path = repo_root / "configs" / "config.yaml"
 
         # Start with defaults from config.yaml then layer in persisted config
         self.base_config: Dict[str, str] = load_config(str(config_path), BASE_CONFIG)
         self.base_config = load_config(str(PERSIST_PATH), self.base_config)
+
+        # Load language preference
+        saved_lang = self.base_config.get("LANGUAGE", "zh")
+        self.i18n = get_i18n(saved_lang)
+        self.i18n.add_observer(self._on_language_changed)
+
+        self.root.title(t("app_title"))
+        self.root.geometry("1000x700")
+
+        # Configure modern styling
+        self.setup_styles()
 
         # Environment variables have higher priority than persisted config
         for key in [
@@ -52,29 +60,30 @@ class BaseWindow:
                 self.base_config[key] = env_val
 
         # Header Frame
-        header = ttk.Frame(self.root, style="Header.TFrame")
-        header.pack(fill=tk.X, padx=15, pady=(10, 5))
+        self.header = ttk.Frame(self.root, style="Header.TFrame")
+        self.header.pack(fill=tk.X, padx=15, pady=(10, 5))
 
-        title_label = ttk.Label(header, text="LitRx Toolkit", style="Title.TLabel")
-        title_label.pack(side=tk.LEFT)
+        self.title_label = ttk.Label(self.header, text=t("title_label"), style="Title.TLabel")
+        self.title_label.pack(side=tk.LEFT)
 
-        subtitle_label = ttk.Label(header, text="AI-powered Literature Review Assistant", style="Subtitle.TLabel")
-        subtitle_label.pack(side=tk.LEFT, padx=(10, 0))
+        self.subtitle_label = ttk.Label(self.header, text=t("subtitle_label"), style="Subtitle.TLabel")
+        self.subtitle_label.pack(side=tk.LEFT, padx=(10, 0))
 
         # Configuration Frame
-        config_frame = ttk.LabelFrame(self.root, text=" 配置设置 ", style="Config.TLabelframe")
-        config_frame.pack(fill=tk.X, padx=15, pady=(5, 10))
+        self.config_frame = ttk.LabelFrame(self.root, text=t("config_settings"), style="Config.TLabelframe")
+        self.config_frame.pack(fill=tk.X, padx=15, pady=(5, 10))
 
         # Row 1: Service and API Key
-        row1 = ttk.Frame(config_frame)
-        row1.pack(fill=tk.X, padx=10, pady=8)
+        self.row1 = ttk.Frame(self.config_frame)
+        self.row1.pack(fill=tk.X, padx=10, pady=8)
 
-        ttk.Label(row1, text="AI Service:", width=12).pack(side=tk.LEFT)
+        self.service_label = ttk.Label(self.row1, text=t("ai_service"), width=12)
+        self.service_label.pack(side=tk.LEFT)
         self.service_var = tk.StringVar(
             value=self.base_config.get("AI_SERVICE", "openai")
         )
         service_menu = ttk.Combobox(
-            row1,
+            self.row1,
             textvariable=self.service_var,
             values=["openai", "gemini", "siliconflow"],
             width=15,
@@ -84,7 +93,8 @@ class BaseWindow:
         self.current_service = self.service_var.get()
         service_menu.bind("<<ComboboxSelected>>", self.on_service_change)
 
-        ttk.Label(row1, text="API Key:").pack(side=tk.LEFT, padx=(0, 5))
+        self.api_key_label = ttk.Label(self.row1, text=t("api_key"))
+        self.api_key_label.pack(side=tk.LEFT, padx=(0, 5))
         if self.current_service == "openai":
             initial_key = self.base_config.get("OPENAI_API_KEY", "")
         elif self.current_service == "gemini":
@@ -92,24 +102,38 @@ class BaseWindow:
         else:  # siliconflow
             initial_key = self.base_config.get("SILICONFLOW_API_KEY", "")
         self.api_key_var = tk.StringVar(value=initial_key)
-        ttk.Entry(row1, textvariable=self.api_key_var, width=45, show="*").pack(
+        ttk.Entry(self.row1, textvariable=self.api_key_var, width=45, show="*").pack(
             side=tk.LEFT, padx=5
         )
 
-        # Row 2: Model and Buttons
-        row2 = ttk.Frame(config_frame)
-        row2.pack(fill=tk.X, padx=10, pady=(0, 8))
+        # Row 2: Model, Language and Buttons
+        self.row2 = ttk.Frame(self.config_frame)
+        self.row2.pack(fill=tk.X, padx=10, pady=(0, 8))
 
-        ttk.Label(row2, text="Model:", width=12).pack(side=tk.LEFT)
+        self.model_label = ttk.Label(self.row2, text=t("model"), width=12)
+        self.model_label.pack(side=tk.LEFT)
         self.model_var = tk.StringVar(value=self.base_config.get("MODEL_NAME", ""))
-        ttk.Entry(row2, textvariable=self.model_var, width=30).pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Entry(self.row2, textvariable=self.model_var, width=20).pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Button(row2, text="💾 保存配置", command=self.save_config, style="Primary.TButton").pack(
-            side=tk.LEFT, padx=5
+        self.language_label = ttk.Label(self.row2, text=t("language"))
+        self.language_label.pack(side=tk.LEFT, padx=(0, 5))
+        self.language_var = tk.StringVar(value=self.i18n.current_language)
+        self.language_menu = ttk.Combobox(
+            self.row2,
+            textvariable=self.language_var,
+            values=["zh", "en"],
+            width=8,
+            state="readonly",
         )
-        ttk.Button(row2, text="⚙️ Prompt设置", command=self.open_prompt_settings, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=5
-        )
+        self.language_menu.pack(side=tk.LEFT, padx=(0, 10))
+        self.language_menu.bind("<<ComboboxSelected>>", self.on_language_change)
+        # Update display to show language names
+        self._update_language_display()
+
+        self.save_button = ttk.Button(self.row2, text=t("save_config"), command=self.save_config, style="Primary.TButton")
+        self.save_button.pack(side=tk.LEFT, padx=5)
+        self.prompt_button = ttk.Button(self.row2, text=t("prompt_settings"), command=self.open_prompt_settings, style="Secondary.TButton")
+        self.prompt_button.pack(side=tk.LEFT, padx=5)
 
         self.notebook = ttk.Notebook(self.root, style="Main.TNotebook")
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
@@ -164,6 +188,7 @@ class BaseWindow:
         model = self.model_var.get().strip()
         if model:
             config["MODEL_NAME"] = model
+        config["LANGUAGE"] = self.language_var.get()
         self.base_config.update(config)
         return config
 
@@ -183,7 +208,7 @@ class BaseWindow:
         config = self.build_config()
         if yaml is None:
             messagebox.showerror(
-                "Error", "pyyaml is required to save configuration"
+                t("error"), "pyyaml is required to save configuration"
             )
             return
 
@@ -196,6 +221,7 @@ class BaseWindow:
                 "OPENAI_API_KEY",
                 "GEMINI_API_KEY",
                 "SILICONFLOW_API_KEY",
+                "LANGUAGE",
             ]
         }
 
@@ -203,10 +229,10 @@ class BaseWindow:
             with PERSIST_PATH.open("w", encoding="utf-8") as f:
                 yaml.safe_dump(data, f)
         except Exception as e:  # pragma: no cover - user feedback
-            messagebox.showerror("Error", f"Failed to save config: {e}")
+            messagebox.showerror(t("error"), t("save_failed", error=str(e)))
         else:  # pragma: no cover - user feedback
             messagebox.showinfo(
-                "Saved", f"Configuration saved to {PERSIST_PATH}"
+                t("saved"), t("config_saved", path=str(PERSIST_PATH))
             )
 
     def on_service_change(self, event=None) -> None:
@@ -227,10 +253,52 @@ class BaseWindow:
         elif self.current_service == "siliconflow":
             self.api_key_var.set(self.base_config.get("SILICONFLOW_API_KEY", ""))
 
+    def on_language_change(self, event=None) -> None:
+        """Handle language selection change."""
+        new_lang = self.language_var.get()
+        if new_lang != self.i18n.current_language:
+            self.i18n.current_language = new_lang
+            self._update_language_display()
+
+    def _update_language_display(self) -> None:
+        """Update the language combobox to show language names."""
+        # Update combobox display values
+        lang_display = {
+            "zh": t("lang_chinese"),
+            "en": t("lang_english")
+        }
+        current = self.language_var.get()
+        self.language_menu.config(values=[lang_display["zh"], lang_display["en"]])
+        self.language_menu.set(lang_display[current])
+
+    def _on_language_changed(self) -> None:
+        """Called when language is changed to update all UI text."""
+        # Update window title
+        self.root.title(t("app_title"))
+
+        # Update header
+        self.title_label.config(text=t("title_label"))
+        self.subtitle_label.config(text=t("subtitle_label"))
+
+        # Update config frame
+        self.config_frame.config(text=t("config_settings"))
+        self.service_label.config(text=t("ai_service"))
+        self.api_key_label.config(text=t("api_key"))
+        self.model_label.config(text=t("model"))
+        self.language_label.config(text=t("language"))
+        self.save_button.config(text=t("save_config"))
+        self.prompt_button.config(text=t("prompt_settings"))
+
+        # Update language display
+        self._update_language_display()
+
+        # Notify child tabs to update their UI
+        # Child classes should override this if they have additional UI to update
+
     def open_prompt_settings(self) -> None:
         """Open the prompt settings dialog."""
         dialog = tk.Toplevel(self.root)
-        dialog.title("Prompt设置")
+        dialog.title(t("prompt_settings_title"))
         dialog.geometry("800x600")
         dialog.transient(self.root)
         dialog.grab_set()
@@ -251,17 +319,17 @@ class BaseWindow:
 
         # CSV Analysis Tab
         csv_frame = ttk.Frame(notebook)
-        notebook.add(csv_frame, text="CSV相关性分析")
+        notebook.add(csv_frame, text=t("csv_analysis"))
         text_widgets["csv_analysis"] = self._create_prompt_editor(csv_frame, prompts.get("csv_analysis", {}))
 
         # Abstract Screening Tab
         abstract_frame = ttk.Frame(notebook)
-        notebook.add(abstract_frame, text="摘要筛选")
+        notebook.add(abstract_frame, text=t("abstract_screening"))
         text_widgets["abstract_screening"] = self._create_prompt_editor(abstract_frame, prompts.get("abstract_screening", {}))
 
         # PDF Screening Tab
         pdf_frame = ttk.Frame(notebook)
-        notebook.add(pdf_frame, text="PDF筛选")
+        notebook.add(pdf_frame, text=t("pdf_screening"))
         text_widgets["pdf_screening"] = self._create_prompt_editor(pdf_frame, prompts.get("pdf_screening", {}))
 
         # Buttons
@@ -279,27 +347,27 @@ class BaseWindow:
 
                 with PROMPTS_PATH.open("w", encoding="utf-8") as f:
                     json.dump(updated_prompts, f, ensure_ascii=False, indent=2)
-                messagebox.showinfo("成功", "Prompt设置已保存", parent=dialog)
+                messagebox.showinfo(t("success"), t("prompt_saved"), parent=dialog)
                 dialog.destroy()
             except Exception as e:
-                messagebox.showerror("错误", f"保存失败: {e}", parent=dialog)
+                messagebox.showerror(t("error"), t("save_failed", error=str(e)), parent=dialog)
 
         def reset_defaults():
-            if messagebox.askyesno("确认", "确定要恢复默认Prompt设置吗？", parent=dialog):
+            if messagebox.askyesno(t("confirm"), t("reset_prompt_confirm"), parent=dialog):
                 # Restore default prompts
                 default_prompts = self._get_default_prompts()
                 try:
                     with PROMPTS_PATH.open("w", encoding="utf-8") as f:
                         json.dump(default_prompts, f, ensure_ascii=False, indent=2)
-                    messagebox.showinfo("成功", "已恢复默认设置", parent=dialog)
+                    messagebox.showinfo(t("success"), t("reset_success"), parent=dialog)
                     dialog.destroy()
                     self.open_prompt_settings()  # Reopen dialog with defaults
                 except Exception as e:
-                    messagebox.showerror("错误", f"恢复失败: {e}", parent=dialog)
+                    messagebox.showerror(t("error"), t("reset_failed", error=str(e)), parent=dialog)
 
-        ttk.Button(button_frame, text="保存", command=save_prompts).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="恢复默认", command=reset_defaults).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text=t("save"), command=save_prompts).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text=t("reset_defaults"), command=reset_defaults).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text=t("cancel"), command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
 
     def _create_prompt_editor(self, parent, prompts_dict):
         """Create prompt editor widgets and return dictionary of text widgets."""
