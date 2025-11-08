@@ -223,7 +223,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 class I18n:
     """Internationalization manager."""
 
-    def __init__(self, default_language: str = "zh"):
+    def __init__(self, default_language: str = "en"):
         """
         Initialize i18n manager.
 
@@ -302,7 +302,7 @@ class I18n:
 # Global i18n instance
 _i18n_instance = None
 
-def get_i18n(default_language: str = "zh") -> I18n:
+def get_i18n(default_language: str = "en") -> I18n:
     """
     Get the global i18n instance.
 
