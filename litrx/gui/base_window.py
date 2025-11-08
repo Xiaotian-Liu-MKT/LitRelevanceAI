@@ -37,8 +37,15 @@ class BaseWindow:
 
         # Load language preference (default to English for first-time users)
         saved_lang = self.base_config.get("LANGUAGE", "en")
-        self.i18n = get_i18n(saved_lang)
-        self.i18n.add_observer(self._on_language_changed)
+        normalized_lang = self._normalize_language_code(saved_lang)
+        if normalized_lang != saved_lang:
+            self.base_config["LANGUAGE"] = normalized_lang
+
+        self.i18n = get_i18n(normalized_lang)
+        if self.i18n.current_language != normalized_lang:
+            # Set the initial language before observers are registered so UI setup
+            # uses the correct translations without triggering callbacks early.
+            self.i18n.current_language = normalized_lang
 
         self.root.title(t("app_title"))
         self.root.geometry("1000x700")
@@ -138,6 +145,9 @@ class BaseWindow:
         self.notebook = ttk.Notebook(self.root, style="Main.TNotebook")
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
 
+        # Register language change observer after UI widgets have been created.
+        self.i18n.add_observer(self._on_language_changed)
+
     def setup_styles(self) -> None:
         """Configure modern ttk styles."""
         style = ttk.Style()
@@ -174,6 +184,34 @@ class BaseWindow:
     # ------------------------------------------------------------------
     # Utilities
     # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_language_code(lang_value: str) -> str:
+        """Return a supported language code for the provided value."""
+        if not lang_value:
+            return "en"
+
+        raw_value = lang_value.strip()
+        lowered_value = raw_value.lower()
+        normalized_value = lowered_value.replace("_", "-")
+
+        mapping = {
+            "zh": "zh",
+            "zh-cn": "zh",
+            "zh_cn": "zh",
+            "zh-hans": "zh",
+            "chinese": "zh",
+            "中文": "zh",
+            "简体中文": "zh",
+            "en": "en",
+            "en-us": "en",
+            "en_us": "en",
+            "en-gb": "en",
+            "english": "en",
+            "英文": "en",
+        }
+
+        return mapping.get(raw_value, mapping.get(lowered_value, mapping.get(normalized_value, "en")))
+
     def build_config(self) -> Dict[str, str]:
         config = self.base_config.copy()
         service = self.service_var.get()
@@ -188,7 +226,8 @@ class BaseWindow:
         model = self.model_var.get().strip()
         if model:
             config["MODEL_NAME"] = model
-        config["LANGUAGE"] = self.language_var.get()
+        # Persist the actual language code rather than the localized display name
+        config["LANGUAGE"] = self.i18n.current_language
         self.base_config.update(config)
         return config
 
@@ -255,20 +294,13 @@ class BaseWindow:
 
     def on_language_change(self, event=None) -> None:
         """Handle language selection change."""
-        # Map display names back to language codes
-        display_to_code = {
-            t("lang_chinese"): "zh",
-            t("lang_english"): "en",
-            "中文": "zh",  # Fallback for direct Chinese name
-            "English": "en"  # Fallback for direct English name
-        }
-
         selected = self.language_var.get()
-        new_lang = display_to_code.get(selected, selected)  # Try to map, otherwise use as-is
+        new_lang = self._normalize_language_code(selected)
 
         if new_lang != self.i18n.current_language:
             self.i18n.current_language = new_lang
             self._update_language_display()
+            self.base_config["LANGUAGE"] = new_lang
 
     def _update_language_display(self) -> None:
         """Update the language combobox to show language names."""
@@ -278,8 +310,11 @@ class BaseWindow:
             "en": t("lang_english")
         }
         current_code = self.i18n.current_language  # Use actual language code from i18n
-        self.language_menu.config(values=[lang_display["zh"], lang_display["en"]])
-        self.language_menu.set(lang_display[current_code])
+        display_values = [lang_display["zh"], lang_display["en"]]
+        self.language_menu.config(values=display_values)
+        display_value = lang_display.get(current_code, lang_display["en"])
+        self.language_menu.set(display_value)
+        self.language_var.set(display_value)
 
     def _on_language_changed(self) -> None:
         """Called when language is changed to update all UI text."""
