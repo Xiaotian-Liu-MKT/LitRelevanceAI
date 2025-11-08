@@ -188,7 +188,8 @@ class BaseWindow:
         model = self.model_var.get().strip()
         if model:
             config["MODEL_NAME"] = model
-        config["LANGUAGE"] = self.language_var.get()
+        # Save the actual language code, not the display name
+        config["LANGUAGE"] = self.i18n.current_language
         self.base_config.update(config)
         return config
 
