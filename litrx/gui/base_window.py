@@ -35,8 +35,8 @@ class BaseWindow:
         self.base_config: Dict[str, str] = load_config(str(config_path), BASE_CONFIG)
         self.base_config = load_config(str(PERSIST_PATH), self.base_config)
 
-        # Load language preference
-        saved_lang = self.base_config.get("LANGUAGE", "zh")
+        # Load language preference (default to English for new users)
+        saved_lang = self.base_config.get("LANGUAGE", "en")
         self.i18n = get_i18n(saved_lang)
         self.i18n.add_observer(self._on_language_changed)
 
@@ -255,7 +255,17 @@ class BaseWindow:
 
     def on_language_change(self, event=None) -> None:
         """Handle language selection change."""
-        new_lang = self.language_var.get()
+        # Map display name back to language code
+        display_value = self.language_var.get()
+        lang_code_map = {
+            t("lang_chinese"): "zh",
+            t("lang_english"): "en",
+            "中文": "zh",
+            "English": "en"
+        }
+
+        new_lang = lang_code_map.get(display_value, display_value)
+
         if new_lang != self.i18n.current_language:
             self.i18n.current_language = new_lang
             self._update_language_display()
@@ -267,9 +277,11 @@ class BaseWindow:
             "zh": t("lang_chinese"),
             "en": t("lang_english")
         }
-        current = self.language_var.get()
+        current = self.i18n.current_language  # Use i18n's current language, not the var
         self.language_menu.config(values=[lang_display["zh"], lang_display["en"]])
         self.language_menu.set(lang_display[current])
+        # Update the variable to match the display
+        self.language_var.set(lang_display[current])
 
     def _on_language_changed(self) -> None:
         """Called when language is changed to update all UI text."""
