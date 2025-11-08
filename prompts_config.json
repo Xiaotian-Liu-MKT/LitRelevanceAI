@@ -1,0 +1,13 @@
+{
+  "csv_analysis": {
+    "main_prompt": "Please analyze the relevance of the following paper to the research topic \"{research_topic}\":\n\nTitle: {title}\nAbstract: {abstract}\n\nPlease provide the following information:\n1. Relevance analysis (detailed explanation of the connection between the paper and the research topic)\n2. A relevance score from 0-100, where 0 means completely unrelated and 100 means highly relevant\n3. If this paper were to be included in a literature review on the research topic, how should it be cited and discussed? Please tell me directly how you would write it.\n\nPlease return in the following JSON format:\n{{\n    \"relevance_score\": <number>,\n    \"analysis\": \"<analysis text>\",\n    \"literature_review_suggestion\": \"<literature review suggestion>\"\n}}"
+  },
+  "abstract_screening": {
+    "detailed_prompt": "请仔细阅读以下文献的标题和摘要,并结合给定的理论模型/研究问题进行分析。\n请严格按照以下JSON格式返回您的分析结果,所有文本内容请使用中文:\n\n文献标题:{title}\n文献摘要:{abstract}\n\n理论模型/研究问题:{research_question}\n\nJSON输出格式要求:\n{{\n{detailed_analysis_section}\n    \"screening_results\": {{\n{criteria_prompts_str}\n    }}\n}}\n\n重要提示:\n1.  对于 \"detailed_analysis\" 内的每一个子问题(如果存在),请提供简洁、针对性的中文回答。如果摘要中信息不足以回答某个子问题,请注明\"摘要未提供相关信息\"。\n2.  对于 \"screening_results\" 中的每一个筛选条件,请仅使用 \"是\"、\"否\" 或 \"不确定\" 作为回答。\n3.  确保整个输出是一个合法的JSON对象。",
+    "quick_prompt": "请快速分析以下文献的标题和摘要,帮助进行每周文献筛选:\n\n文献标题:{title}\n文献摘要:{abstract}\n\n请按以下JSON格式回答:\n{{\n    \"quick_analysis\": {{\n{open_q_str}\n    }},\n    \"screening_results\": {{\n{yes_no_str}\n    }}\n}}",
+    "verification_prompt": "请根据以下文献标题和摘要,核对AI之前的回答是否与文献内容一致。\n文献标题:{title}\n文献摘要:{abstract}\n\n问题与AI初始回答如下:\n{verification_data}\n\n请判断每个回答是否得到标题或摘要支持。如支持回答\"是\",不支持回答\"否\",无法判断回答\"不确定\"。请按如下JSON格式返回:\n{{\n    \"quick_analysis\": {{{open_keys}}},\n    \"screening_results\": {{{yes_no_keys}}}\n}}"
+  },
+  "pdf_screening": {
+    "main_prompt": "请阅读所提供的文献并根据研究问题进行分析。请严格按照以下JSON格式以中文回答:\n{{{da_section}\n    \"screening_results\": {{\n{criteria_str}\n    }}\n}}"
+  }
+}
