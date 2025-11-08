@@ -188,8 +188,7 @@ class BaseWindow:
         model = self.model_var.get().strip()
         if model:
             config["MODEL_NAME"] = model
-        # Always save the language code (zh/en), not the display name
-        config["LANGUAGE"] = self.i18n.current_language
+        config["LANGUAGE"] = self.language_var.get()
         self.base_config.update(config)
         return config
 
@@ -279,12 +278,6 @@ class BaseWindow:
             "en": t("lang_english")
         }
         current_code = self.i18n.current_language  # Use actual language code from i18n
-
-        # Handle invalid language codes by defaulting to English
-        if current_code not in lang_display:
-            current_code = "en"
-            self.i18n.current_language = "en"
-
         self.language_menu.config(values=[lang_display["zh"], lang_display["en"]])
         self.language_menu.set(lang_display[current_code])
 
