@@ -52,6 +52,17 @@ def load_mode_questions(mode: str) -> Dict[str, Any]:
         return {"open_questions": [], "yes_no_questions": []}
 
 
+def load_prompts() -> Dict[str, str]:
+    """Load prompt templates from prompts_config.json."""
+    prompts_path = Path(__file__).resolve().parent.parent / "prompts_config.json"
+    try:
+        with prompts_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("abstract_screening", {})
+    except Exception:
+        return {}
+
+
 def load_config(path: Optional[str] = None, mode: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Load module configuration and questions for the given mode."""
 
@@ -123,7 +134,11 @@ def prepare_dataframe(df, open_questions, yes_no_questions):
         df[f"{q['column_name']}_verified"] = ''
     return df
 
-def construct_ai_prompt(title, abstract, research_question, screening_criteria, detailed_analysis_questions):
+def construct_ai_prompt(title, abstract, research_question, screening_criteria, detailed_analysis_questions, prompts=None):
+    """Construct detailed analysis prompt using template."""
+    if prompts is None:
+        prompts = load_prompts()
+
     criteria_prompts_str = ",\n".join([f'        "{criterion}": "请回答 \'是\', \'否\', 或 \'不确定\'"' for criterion in screening_criteria])
 
     detailed_analysis_prompts_list = []
@@ -140,15 +155,16 @@ def construct_ai_prompt(title, abstract, research_question, screening_criteria, 
 {detailed_analysis_prompts_str}
     }},""" # 注意这里末尾的逗号，如果 screening_results 存在则需要
 
-    prompt = f"""请仔细阅读以下文献的标题和摘要，并结合给定的理论模型/研究问题进行分析。
-请严格按照以下JSON格式返回您的分析结果，所有文本内容请使用中文：
+    # Use template from prompts_config.json or fall back to default
+    template = prompts.get("detailed_prompt", """请仔细阅读以下文献的标题和摘要,并结合给定的理论模型/研究问题进行分析。
+请严格按照以下JSON格式返回您的分析结果,所有文本内容请使用中文:
 
-文献标题：{title}
-文献摘要：{abstract}
+文献标题:{title}
+文献摘要:{abstract}
 
-理论模型/研究问题：{research_question}
+理论模型/研究问题:{research_question}
 
-JSON输出格式要求：
+JSON输出格式要求:
 {{
 {detailed_analysis_section}
     "screening_results": {{
@@ -156,24 +172,36 @@ JSON输出格式要求：
     }}
 }}
 
-重要提示：
-1.  对于 "detailed_analysis" 内的每一个子问题（如果存在），请提供简洁、针对性的中文回答。如果摘要中信息不足以回答某个子问题，请注明“摘要未提供相关信息”。
-2.  对于 "screening_results" 中的每一个筛选条件，请仅使用 "是"、"否" 或 "不确定" 作为回答。
+重要提示:
+1.  对于 "detailed_analysis" 内的每一个子问题(如果存在),请提供简洁、针对性的中文回答。如果摘要中信息不足以回答某个子问题,请注明"摘要未提供相关信息"。
+2.  对于 "screening_results" 中的每一个筛选条件,请仅使用 "是"、"否" 或 "不确定" 作为回答。
 3.  确保整个输出是一个合法的JSON对象。
-"""
-    return prompt
+""")
+
+    return template.format(
+        title=title,
+        abstract=abstract,
+        research_question=research_question,
+        detailed_analysis_section=detailed_analysis_section,
+        criteria_prompts_str=criteria_prompts_str
+    )
 
 
 def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions):
+    """Construct prompt using templates from prompts_config.json."""
+    prompts = load_prompts()
+
     if config.get('GENERAL_SCREENING_MODE') or not config.get('RESEARCH_QUESTION'):
         open_q_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in open_questions])
         yes_no_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in yes_no_questions])
-        prompt = f"""请快速分析以下文献的标题和摘要，帮助进行每周文献筛选：
 
-文献标题：{title}
-文献摘要：{abstract}
+        # Use template from prompts_config.json or fall back to default
+        template = prompts.get("quick_prompt", """请快速分析以下文献的标题和摘要,帮助进行每周文献筛选:
 
-请按以下JSON格式回答：
+文献标题:{title}
+文献摘要:{abstract}
+
+请按以下JSON格式回答:
 {{
     "quick_analysis": {{
 {open_q_str}
@@ -181,12 +209,13 @@ def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_qu
     "screening_results": {{
 {yes_no_str}
     }}
-}}"""
-        return prompt
+}}""")
+
+        return template.format(title=title, abstract=abstract, open_q_str=open_q_str, yes_no_str=yes_no_str)
     else:
         screening_criteria = [q['question'] for q in yes_no_questions]
         detailed = [{'prompt_key': q['key'], 'question_text': q['question'], 'df_column_name': q['column_name']} for q in open_questions]
-        return construct_ai_prompt(title, abstract, config['RESEARCH_QUESTION'], screening_criteria, detailed)
+        return construct_ai_prompt(title, abstract, config['RESEARCH_QUESTION'], screening_criteria, detailed, prompts)
 
 def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_no_questions, max_retries=3):
     def build_error_response(msg):
@@ -276,6 +305,7 @@ def verify_ai_response(title, abstract, initial_json, client, open_questions, ye
     respond with "是", "否" or "不确定" for each question.  The parsed results are
     returned in the same structure as ``parse_ai_response_json``.
     """
+    prompts = load_prompts()
 
     verification_data = {
         "quick_analysis": {
@@ -294,19 +324,29 @@ def verify_ai_response(title, abstract, initial_json, client, open_questions, ye
         },
     }
 
-    prompt = (
-        "请根据以下文献标题和摘要，核对AI之前的回答是否与文献内容一致。\n"
-        f"文献标题：{title}\n"
-        f"文献摘要：{abstract}\n\n"
-        "问题与AI初始回答如下：\n"
-        f"{json.dumps(verification_data, ensure_ascii=False, indent=2)}\n\n"
-        "请判断每个回答是否得到标题或摘要支持。如支持回答\"是\"，不支持回答\"否\"，无法判断回答\"不确定\"。"
-        "请按如下JSON格式返回：\n"
-        "{\n    \"quick_analysis\": {" +
-        ", ".join([f'\"{q["key"]}\": \"\"' for q in open_questions]) +
-        "},\n    \"screening_results\": {" +
-        ", ".join([f'\"{q["key"]}\": \"\"' for q in yes_no_questions]) +
-        "}\n}"
+    open_keys = ", ".join([f'\"{q["key"]}\": \"\"' for q in open_questions])
+    yes_no_keys = ", ".join([f'\"{q["key"]}\": \"\"' for q in yes_no_questions])
+
+    # Use template from prompts_config.json or fall back to default
+    template = prompts.get("verification_prompt", """请根据以下文献标题和摘要,核对AI之前的回答是否与文献内容一致。
+文献标题:{title}
+文献摘要:{abstract}
+
+问题与AI初始回答如下:
+{verification_data}
+
+请判断每个回答是否得到标题或摘要支持。如支持回答\"是\",不支持回答\"否\",无法判断回答\"不确定\"。请按如下JSON格式返回:
+{{
+    \"quick_analysis\": {{{open_keys}}},
+    \"screening_results\": {{{yes_no_keys}}}
+}}""")
+
+    prompt = template.format(
+        title=title,
+        abstract=abstract,
+        verification_data=json.dumps(verification_data, ensure_ascii=False, indent=2),
+        open_keys=open_keys,
+        yes_no_keys=yes_no_keys
     )
 
     try:

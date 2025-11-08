@@ -39,11 +39,41 @@ def load_config(path: Optional[str] = None, questions_path: Optional[str] = None
     return config, questions
 
 class LiteratureAnalyzer:
-    def __init__(self, config: Dict[str, Any], questions: Dict[str, Any], research_topic: str):
+    def __init__(self, config: Dict[str, Any], research_topic: str = "", questions: Dict[str, Any] = None):
         self.research_topic = research_topic
         self.config = config
-        self.questions = questions
+        self.questions = questions or {}
         self.client = AIClient(config)
+        self.prompt_template = self._load_prompt_template()
+
+    def _load_prompt_template(self) -> str:
+        """Load prompt template from prompts_config.json."""
+        prompts_path = Path(__file__).resolve().parent.parent / "prompts_config.json"
+        try:
+            with open(prompts_path, 'r', encoding='utf-8') as f:
+                prompts = json.load(f)
+                return prompts.get("csv_analysis", {}).get("main_prompt", self._get_default_prompt())
+        except Exception:
+            return self._get_default_prompt()
+
+    def _get_default_prompt(self) -> str:
+        """Get default CSV analysis prompt."""
+        return """Please analyze the relevance of the following paper to the research topic "{research_topic}":
+
+Title: {title}
+Abstract: {abstract}
+
+Please provide the following information:
+1. Relevance analysis (detailed explanation of the connection between the paper and the research topic)
+2. A relevance score from 0-100, where 0 means completely unrelated and 100 means highly relevant
+3. If this paper were to be included in a literature review on the research topic, how should it be cited and discussed? Please tell me directly how you would write it.
+
+Please return in the following JSON format:
+{{
+    "relevance_score": <number>,
+    "analysis": "<analysis text>",
+    "literature_review_suggestion": "<literature review suggestion>"
+}}"""
 
     def read_scopus_csv(self, file_path: str) -> pd.DataFrame:
         """Read Scopus exported CSV file"""
@@ -80,22 +110,11 @@ class LiteratureAnalyzer:
 
     def analyze_paper(self, title: str, abstract: str) -> Dict:
         """Analyze the relevance of a single paper to the research topic"""
-        prompt = f"""Please analyze the relevance of the following paper to the research topic "{self.research_topic}":
-
-Title: {title}
-Abstract: {abstract}
-
-Please provide the following information:
-1. Relevance analysis (detailed explanation of the connection between the paper and the research topic)
-2. A relevance score from 0-100, where 0 means completely unrelated and 100 means highly relevant
-3. If this paper were to be included in a literature review on the research topic, how should it be cited and discussed? Please tell me directly how you would write it.
-
-Please return in the following JSON format:
-{{
-    "relevance_score": <number>,
-    "analysis": "<analysis text>",
-    "literature_review_suggestion": "<literature review suggestion>"
-}}"""
+        prompt = self.prompt_template.format(
+            research_topic=self.research_topic,
+            title=title,
+            abstract=abstract
+        )
         try:
             response = self.client.request(
                 messages=[{"role": "user", "content": prompt}],

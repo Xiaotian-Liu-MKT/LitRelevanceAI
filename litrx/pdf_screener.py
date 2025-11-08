@@ -71,6 +71,17 @@ DEFAULT_CONFIG: Dict[str, object] = {
 }
 
 
+def load_prompts() -> Dict[str, str]:
+    """Load prompt templates from prompts_config.json."""
+    prompts_path = Path(__file__).resolve().parent.parent / "prompts_config.json"
+    try:
+        with prompts_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("pdf_screening", {})
+    except Exception:
+        return {}
+
+
 def load_config(path: Optional[str] = None, questions_path: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Load module configuration and question templates."""
 
@@ -158,7 +169,8 @@ def construct_ai_prompt_instructions(
     screening_criteria: List[str],
     detailed_questions: List[Dict[str, str]],
 ) -> str:
-    """Construct the textual instructions for the model."""
+    """Construct the textual instructions for the model using template."""
+    prompts = load_prompts()
 
     criteria_str = ",\n".join(
         [f'        "{c}": "请回答 \'是\', \'否\', 或 \'不确定\'"' for c in screening_criteria]
@@ -168,13 +180,16 @@ def construct_ai_prompt_instructions(
     da_str = ",\n".join(da_list)
     da_section = f"\n    \"detailed_analysis\": {{\n{da_str}\n    }}," if da_str else ""
 
-    return f"""请阅读所提供的文献并根据研究问题进行分析。请严格按照以下JSON格式以中文回答：
+    # Use template from prompts_config.json or fall back to default
+    template = prompts.get("main_prompt", """请阅读所提供的文献并根据研究问题进行分析。请严格按照以下JSON格式以中文回答:
 {{{da_section}
     "screening_results": {{
 {criteria_str}
     }}
 }}
-"""
+""")
+
+    return template.format(da_section=da_section, criteria_str=criteria_str)
 
 
 def parse_ai_response_json(
