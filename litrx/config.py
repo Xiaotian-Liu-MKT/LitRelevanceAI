@@ -20,10 +20,11 @@ except Exception:  # pragma: no cover - fallback if pyyaml missing
 
 # Base configuration shared across scripts.
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "AI_SERVICE": "openai",  # or "gemini"
+    "AI_SERVICE": "openai",  # or "gemini" or "siliconflow"
     "MODEL_NAME": "gpt-4o",
     "OPENAI_API_KEY": "",
     "GEMINI_API_KEY": "",
+    "SILICONFLOW_API_KEY": "",
     "API_BASE": "",
 }
 
