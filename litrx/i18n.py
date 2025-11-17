@@ -111,7 +111,15 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # Error messages
         "error_fill_fields": "请填写研究主题并选择文件",
         "error_select_file": "请先选择文件",
-        "error_read_file": "读取文件失败: {}",
+        "error_read_file": "读取文件失败: {error}",
+        "error_no_results": "没有可导出的结果",
+        "error_analysis": "错误 {error}",
+
+        # Success messages
+        "results_exported": "结果已导出",
+
+        # File types
+        "csv_files": "CSV 文件",
     },
     "en": {
         # Window titles
@@ -216,7 +224,15 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # Error messages
         "error_fill_fields": "Please enter research topic and select a file",
         "error_select_file": "Please select a file first",
-        "error_read_file": "Failed to read file: {}",
+        "error_read_file": "Failed to read file: {error}",
+        "error_no_results": "No results to export",
+        "error_analysis": "Error {error}",
+
+        # Success messages
+        "results_exported": "Results exported successfully",
+
+        # File types
+        "csv_files": "CSV Files",
     }
 }
 
