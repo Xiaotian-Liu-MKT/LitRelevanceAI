@@ -213,7 +213,14 @@ class AbstractTab:
             # Apply settings from mode config if available
             mode_settings = q.get("settings", {})
             if mode_settings:
-                config.update(mode_settings)
+                # Normalize lowercase keys to uppercase for consistency
+                normalized_settings = {
+                    "MAX_WORKERS": mode_settings.get("max_workers"),
+                    "API_REQUEST_DELAY": mode_settings.get("api_request_delay"),
+                    "ENABLE_VERIFICATION": mode_settings.get("enable_verification"),
+                }
+                # Only update config with non-None values
+                config.update({k: v for k, v in normalized_settings.items() if v is not None})
 
             # Get column names
             title_col = self.title_col_var.get().strip() or None
