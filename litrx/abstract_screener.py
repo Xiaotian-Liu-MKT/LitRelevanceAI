@@ -526,6 +526,9 @@ class AbstractScreener:
     ) -> Dict[str, Any]:
         """Analyze a single article.
 
+        DEPRECATED: This method directly mutates the DataFrame, which is not thread-safe.
+        Use compute_single_article_results() for concurrent processing.
+
         Args:
             df: DataFrame to store results
             index: Row index in DataFrame
@@ -538,16 +541,51 @@ class AbstractScreener:
         Returns:
             Dictionary with 'initial' and 'verification' results
         """
+        # Compute results without mutating DataFrame
+        results = self.compute_single_article_results(
+            row, title_col, abstract_col, open_questions, yes_no_questions
+        )
+
+        # Apply results to DataFrame (not thread-safe - use only in sequential processing)
+        self._apply_results_to_dataframe(df, index, results, open_questions, yes_no_questions)
+
+        return {"initial": results.get("parsed_data", {}), "verification": results.get("verification", {})}
+
+    def compute_single_article_results(
+        self,
+        row: pd.Series,
+        title_col: str,
+        abstract_col: str,
+        open_questions: List[Dict],
+        yes_no_questions: List[Dict]
+    ) -> Dict[str, Any]:
+        """Compute analysis results for a single article without DataFrame mutation.
+
+        This method is thread-safe and suitable for concurrent processing.
+
+        Args:
+            row: Row data
+            title_col: Title column name
+            abstract_col: Abstract column name
+            open_questions: List of open-ended questions
+            yes_no_questions: List of yes/no questions
+
+        Returns:
+            Dictionary with all computed values for DataFrame columns
+        """
         title = str(row[title_col]) if pd.notna(row[title_col]) else "无标题"
         abstract = str(row[abstract_col]) if pd.notna(row[abstract_col]) else "无摘要"
 
         # Handle missing data
         if title == "无标题" and abstract == "无摘要":
+            results = {"missing_data": True, "columns": {}}
             for q in open_questions:
-                df.at[index, q['column_name']] = "标题和摘要均缺失"
+                results["columns"][q['column_name']] = "标题和摘要均缺失"
+                results["columns"][f"{q['column_name']}_verified"] = "未验证"
             for q in yes_no_questions:
-                df.at[index, q['column_name']] = "无法处理"
-            return {}
+                results["columns"][q['column_name']] = "无法处理"
+                results["columns"][f"{q['column_name']}_verified"] = "未验证"
+            return results
 
         # Get AI analysis
         prompt = construct_flexible_prompt(
@@ -560,35 +598,65 @@ class AbstractScreener:
             ai_response_json_str, open_questions, yes_no_questions
         )
 
-        # Store initial results
+        # Prepare results dictionary
+        results = {
+            "parsed_data": parsed_data,
+            "verification": {},
+            "columns": {}
+        }
+
+        # Extract initial results
         qa = parsed_data.get('quick_analysis', {})
         for q in open_questions:
-            df.at[index, q['column_name']] = qa.get(q['key'], "信息缺失")
+            results["columns"][q['column_name']] = qa.get(q['key'], "信息缺失")
 
         sr = parsed_data.get('screening_results', {})
         for q in yes_no_questions:
-            df.at[index, q['column_name']] = sr.get(q['key'], "信息缺失")
+            results["columns"][q['column_name']] = sr.get(q['key'], "信息缺失")
 
         # Verification
-        verification = {}
         if self.config.get('ENABLE_VERIFICATION', True):
             verification = verify_ai_response(
                 title, abstract, parsed_data, self.client, open_questions, yes_no_questions
             )
+            results["verification"] = verification
+
             vqa = verification.get('quick_analysis', {})
             for q in open_questions:
-                df.at[index, f"{q['column_name']}_verified"] = vqa.get(q['key'], "验证失败")
+                results["columns"][f"{q['column_name']}_verified"] = vqa.get(q['key'], "验证失败")
 
             vsr = verification.get('screening_results', {})
             for q in yes_no_questions:
-                df.at[index, f"{q['column_name']}_verified"] = vsr.get(q['key'], "验证失败")
+                results["columns"][f"{q['column_name']}_verified"] = vsr.get(q['key'], "验证失败")
         else:
             for q in open_questions:
-                df.at[index, f"{q['column_name']}_verified"] = '未验证'
+                results["columns"][f"{q['column_name']}_verified"] = '未验证'
             for q in yes_no_questions:
-                df.at[index, f"{q['column_name']}_verified"] = '未验证'
+                results["columns"][f"{q['column_name']}_verified"] = '未验证'
 
-        return {"initial": parsed_data, "verification": verification}
+        return results
+
+    def _apply_results_to_dataframe(
+        self,
+        df: pd.DataFrame,
+        index: int,
+        results: Dict[str, Any],
+        open_questions: List[Dict],
+        yes_no_questions: List[Dict]
+    ) -> None:
+        """Apply computed results to DataFrame.
+
+        This method is NOT thread-safe and should only be called from the main thread.
+
+        Args:
+            df: DataFrame to update
+            index: Row index
+            results: Results dictionary from compute_single_article_results
+            open_questions: List of open-ended questions
+            yes_no_questions: List of yes/no questions
+        """
+        for col_name, value in results.get("columns", {}).items():
+            df.at[index, col_name] = value
 
     def analyze_batch_concurrent(
         self,
@@ -601,6 +669,9 @@ class AbstractScreener:
         stop_event: Optional[Any] = None
     ) -> pd.DataFrame:
         """Analyze multiple articles concurrently.
+
+        This method is thread-safe: workers compute results without mutating the DataFrame,
+        and the main thread applies updates sequentially.
 
         Args:
             df: DataFrame with articles
@@ -618,19 +689,20 @@ class AbstractScreener:
         total = len(df)
 
         def process_article(index_row_tuple):
-            """Process a single article (for thread pool)."""
+            """Process a single article (for thread pool) - thread-safe."""
             index, row = index_row_tuple
             if stop_event and stop_event.is_set():
                 return index, None
 
-            result = self.analyze_single_article(
-                df, index, row, title_col, abstract_col,
+            # Compute results without mutating DataFrame (thread-safe)
+            results = self.compute_single_article_results(
+                row, title_col, abstract_col,
                 open_questions, yes_no_questions
             )
 
             # Add delay to avoid rate limiting
             time.sleep(self.config.get('API_REQUEST_DELAY', 1))
-            return index, result
+            return index, results
 
         # Process articles concurrently
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -640,9 +712,24 @@ class AbstractScreener:
             }
 
             for future in as_completed(futures):
-                index, result = future.result()
+                index, results = future.result()
+
+                # Apply results to DataFrame in main thread (thread-safe)
+                if results is not None:
+                    self._apply_results_to_dataframe(
+                        df, index, results, open_questions, yes_no_questions
+                    )
+
+                # Prepare callback result in legacy format
+                callback_result = None
+                if results and not results.get("missing_data", False):
+                    callback_result = {
+                        "initial": results.get("parsed_data", {}),
+                        "verification": results.get("verification", {})
+                    }
+
                 if progress_callback:
-                    progress_callback(index, total, result)
+                    progress_callback(index, total, callback_result)
 
                 if stop_event and stop_event.is_set():
                     break
