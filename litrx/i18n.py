@@ -26,7 +26,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # Tab names
         "csv_tab": "CSV相关性分析",
         "abstract_tab": "摘要筛选",
-        "pdf_tab": "PDF筛选",
+        "matrix_tab": "文献矩阵",
 
         # Buttons
         "browse": "浏览",
@@ -131,7 +131,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # Tab names
         "csv_tab": "CSV Relevance Analysis",
         "abstract_tab": "Abstract Screening",
-        "pdf_tab": "PDF Screening",
+        "matrix_tab": "Literature Matrix",
 
         # Buttons
         "browse": "Browse",
