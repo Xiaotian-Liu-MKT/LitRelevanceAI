@@ -26,6 +26,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GEMINI_API_KEY": "",
     "SILICONFLOW_API_KEY": "",
     "API_BASE": "",
+    # GPT-5 specific parameters
+    "VERBOSITY": "medium",  # "low", "medium", or "high"
+    "REASONING_EFFORT": "medium",  # "low", "medium", or "high"
 }
 
 def load_env_file(env_path: str = ".env") -> None:
