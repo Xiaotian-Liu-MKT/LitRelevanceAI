@@ -54,12 +54,6 @@ class MatrixTab:
         config_frame = ttk.LabelFrame(parent, text="矩阵配置", padding="10")
         config_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Research question
-        ttk.Label(config_frame, text="研究问题（可选）:").pack(anchor=tk.W, pady=(0, 2))
-        self.research_question_var = tk.StringVar()
-        research_entry = ttk.Entry(config_frame, textvariable=self.research_question_var)
-        research_entry.pack(fill=tk.X, pady=(0, 10))
-
         # Dimensions info and buttons
         dim_info_frame = ttk.Frame(config_frame)
         dim_info_frame.pack(fill=tk.X, pady=(0, 5))
@@ -195,7 +189,6 @@ class MatrixTab:
         try:
             self.matrix_config = load_matrix_config(str(self.default_config_path))
             self._update_dimension_count()
-            self.research_question_var.set(self.matrix_config.get('research_question', ''))
         except Exception as e:
             messagebox.showerror("配置加载失败", f"无法加载默认配置：\n{str(e)}")
             self.matrix_config = {'dimensions': []}
@@ -233,7 +226,6 @@ class MatrixTab:
 
                 self.matrix_config = config
                 self._update_dimension_count()
-                self.research_question_var.set(config.get('research_question', ''))
                 messagebox.showinfo("导入成功", f"成功导入配置（{len(config.get('dimensions', []))} 个维度）")
 
             except Exception as e:
@@ -253,9 +245,6 @@ class MatrixTab:
 
         if filepath:
             try:
-                # Update research question from GUI
-                self.matrix_config['research_question'] = self.research_question_var.get()
-
                 with open(filepath, 'w', encoding='utf-8') as f:
                     yaml.dump(self.matrix_config, f, allow_unicode=True, sort_keys=False)
 
@@ -292,7 +281,6 @@ class MatrixTab:
                 return
 
         # Update config with current GUI values
-        self.matrix_config['research_question'] = self.research_question_var.get()
         self.matrix_config['output'] = {
             'file_type': self.output_var.get(),
             'file_suffix': '_literature_matrix',
