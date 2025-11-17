@@ -1,5 +1,5 @@
 from .csv_tab import CsvTab
 from .abstract_tab import AbstractTab
-from .pdf_tab import PdfTab
+from .matrix_tab import MatrixTab
 
-__all__ = ["CsvTab", "AbstractTab", "PdfTab"]
+__all__ = ["CsvTab", "AbstractTab", "MatrixTab"]

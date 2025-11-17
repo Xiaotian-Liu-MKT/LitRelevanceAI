@@ -1,0 +1,182 @@
+# 文献矩阵配置文件
+# 支持7种问题类型：text, yes_no, single_choice, multiple_choice, number, rating, list
+
+# 研究问题（可选）
+research_question: ""
+
+# 矩阵维度定义
+dimensions:
+  # 1. 开放文本型 - 用于详细描述性内容
+  - type: text
+    key: main_findings
+    question: "主要研究发现是什么？请用3-5句话概括。"
+    column_name: "主要发现"
+
+  - type: text
+    key: theoretical_framework
+    question: "本研究使用了什么理论框架？"
+    column_name: "理论框架"
+
+  - type: text
+    key: research_context
+    question: "研究的情境或背景是什么？（如行业、地区、组织类型等）"
+    column_name: "研究情境"
+
+  - type: text
+    key: limitations
+    question: "本研究的主要局限性是什么？"
+    column_name: "研究局限"
+
+  # 2. 是/否/不确定型 - 用于快速判断特征
+  - type: yes_no
+    key: empirical_study
+    question: "这是否为实证研究？"
+    column_name: "是否实证研究"
+
+  - type: yes_no
+    key: chinese_sample
+    question: "是否包含中国样本或中国情境？"
+    column_name: "是否中国样本"
+
+  - type: yes_no
+    key: has_hypothesis
+    question: "是否提出了明确的研究假设？"
+    column_name: "是否有假设"
+
+  # 3. 单选型 - 从预定义选项中选择一个
+  - type: single_choice
+    key: research_type
+    question: "这篇文献的研究类型是什么？"
+    column_name: "研究类型"
+    options:
+      - "实证研究"
+      - "理论研究"
+      - "文献综述"
+      - "概念性论文"
+      - "方法论文"
+      - "其他"
+
+  - type: single_choice
+    key: research_paradigm
+    question: "本研究采用的研究范式是什么？"
+    column_name: "研究范式"
+    options:
+      - "定量研究"
+      - "定性研究"
+      - "混合方法"
+      - "不适用"
+
+  - type: single_choice
+    key: publication_type
+    question: "这是什么类型的出版物？"
+    column_name: "出版物类型"
+    options:
+      - "期刊论文"
+      - "会议论文"
+      - "书籍章节"
+      - "学位论文"
+      - "工作论文"
+      - "其他"
+
+  # 4. 多选型 - 可以选择多个选项
+  - type: multiple_choice
+    key: data_collection_methods
+    question: "本研究使用了哪些数据收集方法？（可多选）"
+    column_name: "数据收集方法"
+    options:
+      - "问卷调查"
+      - "深度访谈"
+      - "焦点小组"
+      - "实验"
+      - "观察"
+      - "档案数据"
+      - "二手数据"
+      - "不适用"
+
+  - type: multiple_choice
+    key: analysis_methods
+    question: "本研究使用了哪些数据分析方法？（可多选）"
+    column_name: "数据分析方法"
+    options:
+      - "描述性统计"
+      - "回归分析"
+      - "结构方程模型"
+      - "内容分析"
+      - "扎根理论"
+      - "案例分析"
+      - "其他"
+
+  # 5. 数值提取型 - 提取具体数字
+  - type: number
+    key: sample_size
+    question: "本研究的样本量是多少？如果有多个样本，请报告主要样本的数量。如果不适用或无法确定，请回答'N/A'。"
+    column_name: "样本量"
+    unit: "个"
+
+  - type: number
+    key: response_rate
+    question: "如果是问卷调查，回收率是多少（百分比）？如果不适用或文中未提及，请回答'N/A'。"
+    column_name: "回收率"
+    unit: "%"
+
+  # 6. 评分型 - 主观评估（1-5分）
+  - type: rating
+    key: research_quality
+    question: "请评估本研究的整体质量（考虑研究设计、方法严谨性、结果可信度等）"
+    column_name: "研究质量评分"
+    scale: 5
+    scale_description: "1=很差, 2=较差, 3=一般, 4=良好, 5=优秀"
+
+  - type: rating
+    key: relevance
+    question: "请评估本研究与您的研究问题的相关程度"
+    column_name: "相关性评分"
+    scale: 5
+    scale_description: "1=不相关, 2=略相关, 3=中等相关, 4=高度相关, 5=极其相关"
+
+  # 7. 列表提取型 - 提取多个条目
+  - type: list
+    key: key_variables
+    question: "本研究的关键变量有哪些？请列出主要的自变量和因变量。"
+    column_name: "关键变量"
+    separator: "; "
+
+  - type: list
+    key: key_theories
+    question: "本研究引用或基于哪些主要理论？请列出理论名称。"
+    column_name: "主要理论"
+    separator: "; "
+
+  - type: list
+    key: key_findings_list
+    question: "本研究的主要发现有哪些？请以要点形式列出（3-5点）。"
+    column_name: "主要发现列表"
+    separator: "; "
+
+# 元数据匹配配置
+metadata_matching:
+  # 用于匹配的标识符列（优先级从高到低）
+  id_columns:
+    - "DOI"
+    - "Title"
+    - "Key"  # Zotero Item Key
+
+  # 标题匹配的相似度阈值（0-100）
+  title_similarity_threshold: 80
+
+  # 是否启用文件名模式识别（识别Zotero格式：Author_Year_Title.pdf）
+  enable_filename_parsing: true
+
+# 输出配置
+output:
+  file_type: "xlsx"  # "xlsx" 或 "csv"
+  file_suffix: "_literature_matrix"
+
+  # 是否在输出中包含匹配状态列
+  include_match_status: true
+
+  # 是否在输出中包含匹配置信度列
+  include_match_confidence: true
+
+  # 列的顺序：metadata_first 或 analysis_first
+  column_order: "metadata_first"

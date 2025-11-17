@@ -1,6 +1,6 @@
 import argparse
 
-from . import csv_analyzer, abstract_screener, pdf_screener
+from . import csv_analyzer, abstract_screener, matrix_analyzer
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -17,8 +17,8 @@ def main(argv: list[str] | None = None) -> None:
         func=lambda args: abstract_screener.run_gui() if args.gui else abstract_screener.main()
     )
 
-    pdf_parser = subparsers.add_parser("pdf", help="Screen PDFs in a folder")
-    pdf_parser.set_defaults(func=lambda args: pdf_screener.main())
+    matrix_parser = subparsers.add_parser("matrix", help="Literature matrix analysis from PDFs")
+    matrix_parser.set_defaults(func=lambda args: matrix_analyzer.main())
 
     args = parser.parse_args(argv)
     if hasattr(args, "func"):

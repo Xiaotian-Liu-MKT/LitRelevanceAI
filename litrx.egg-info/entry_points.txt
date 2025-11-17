@@ -1,0 +1,2 @@
+[console_scripts]
+litrx = litrx.cli:main

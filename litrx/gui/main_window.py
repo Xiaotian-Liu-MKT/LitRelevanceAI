@@ -1,5 +1,5 @@
 from .base_window import BaseWindow
-from .tabs import CsvTab, AbstractTab, PdfTab
+from .tabs import CsvTab, AbstractTab, MatrixTab
 from ..i18n import t
 
 
@@ -10,7 +10,7 @@ class LitRxApp(BaseWindow):
         super().__init__()
         self.csv_tab = CsvTab(self)
         self.abstract_tab = AbstractTab(self)
-        self.pdf_tab = PdfTab(self)
+        self.matrix_tab = MatrixTab(self)
 
         # Update tab labels with translations
         self._update_tab_labels()
@@ -21,7 +21,7 @@ class LitRxApp(BaseWindow):
         if len(tabs) >= 3:
             self.notebook.tab(tabs[0], text=t("csv_tab"))
             self.notebook.tab(tabs[1], text=t("abstract_tab"))
-            self.notebook.tab(tabs[2], text=t("pdf_tab"))
+            self.notebook.tab(tabs[2], text=t("matrix_tab"))
 
     def _on_language_changed(self) -> None:
         """Override to update tabs when language changes."""
@@ -33,8 +33,8 @@ class LitRxApp(BaseWindow):
             self.csv_tab.update_language()
         if hasattr(self.abstract_tab, 'update_language'):
             self.abstract_tab.update_language()
-        if hasattr(self.pdf_tab, 'update_language'):
-            self.pdf_tab.update_language()
+        if hasattr(self.matrix_tab, 'update_language'):
+            self.matrix_tab.update_language()
 
 
 def launch_gui() -> None:
