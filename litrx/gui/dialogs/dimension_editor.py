@@ -244,7 +244,6 @@ class DimensionEditorDialog:
             try:
                 import yaml
                 config = {
-                    'research_question': '',
                     'dimensions': self.dimensions,
                     'metadata_matching': {
                         'id_columns': ['DOI', 'Title', 'Key'],

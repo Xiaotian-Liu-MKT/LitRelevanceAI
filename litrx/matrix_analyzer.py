@@ -61,9 +61,6 @@ DEFAULT_CONFIG: Dict[str, object] = {
     # Matrix configuration file path
     "MATRIX_CONFIG_PATH": "",
 
-    # Research question (optional)
-    "RESEARCH_QUESTION": "",
-
     # Data file configuration
     "INPUT_PDF_FOLDER_PATH": "",
     "METADATA_FILE_PATH": "",
@@ -350,7 +347,6 @@ def construct_dimension_prompt(dimension: Dict[str, Any]) -> Tuple[str, str]:
 
 
 def construct_ai_prompt(
-    research_question: str,
     dimensions: List[Dict[str, Any]],
 ) -> str:
     """Construct the complete AI prompt from matrix configuration."""
@@ -366,7 +362,6 @@ def construct_ai_prompt(
     # Construct full prompt
     prompt_template = """请仔细阅读以下文献，并根据要求进行分析。
 
-{research_question_section}
 请严格按照以下JSON格式回答所有问题（使用中文）：
 
 {{
@@ -381,12 +376,7 @@ def construct_ai_prompt(
 5. 保持回答简洁但完整
 """
 
-    research_section = f"研究问题：{research_question}\n" if research_question else ""
-
-    return prompt_template.format(
-        research_question_section=research_section,
-        dimensions_str=dimensions_str
-    )
+    return prompt_template.format(dimensions_str=dimensions_str)
 
 
 # ---------------------------------------------------------------------------
@@ -492,8 +482,7 @@ def process_literature_matrix(
 
     # Get dimensions and construct prompt
     dimensions = matrix_config.get('dimensions', [])
-    research_question = matrix_config.get('research_question', '')
-    base_prompt = construct_ai_prompt(research_question, dimensions)
+    base_prompt = construct_ai_prompt(dimensions)
 
     # Process each PDF
     results = []

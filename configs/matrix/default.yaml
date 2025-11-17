@@ -1,9 +1,6 @@
 # 文献矩阵配置文件
 # 支持7种问题类型：text, yes_no, single_choice, multiple_choice, number, rating, list
 
-# 研究问题（可选）
-research_question: ""
-
 # 矩阵维度定义
 dimensions:
   # 1. 开放文本型 - 用于详细描述性内容
