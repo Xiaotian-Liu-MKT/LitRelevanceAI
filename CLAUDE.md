@@ -4,7 +4,7 @@ This document provides comprehensive guidance for AI assistants (like Claude Cod
 
 ## Project Overview
 
-**LitRelevanceAI** (`litrx` package) is an AI-assisted literature review toolkit for academic researchers. It helps screen and analyze academic papers using large language models (OpenAI GPT, Google Gemini, SiliconFlow).
+**LitRelevanceAI** (`litrx` package) is an AI-assisted literature review toolkit for academic researchers. It helps screen and analyze academic papers using large language models (OpenAI GPT and SiliconFlow).
 
 ### Core Functionality
 - **CSV Relevance Analysis**: Score Scopus exports (0-100) with AI-generated relevance explanations
@@ -15,7 +15,7 @@ This document provides comprehensive guidance for AI assistants (like Claude Cod
 
 ### Technology Stack
 - **Language**: Python 3.8+
-- **AI Provider**: LiteLLM (unified wrapper for OpenAI, Gemini, SiliconFlow)
+- **AI Provider**: OpenAI SDK (supports OpenAI and SiliconFlow APIs)
 - **GUI**: Tkinter (standard library)
 - **Data**: pandas, openpyxl
 - **PDF**: pypdf
@@ -31,7 +31,7 @@ LitRelevanceAI/
 │   ├── __main__.py                 # Entry point: python -m litrx
 │   ├── cli.py                      # CLI dispatcher (csv/abstract/matrix commands)
 │   ├── config.py                   # Cascading configuration management
-│   ├── ai_client.py                # LiteLLM wrapper for AI providers
+│   ├── ai_client.py                # OpenAI SDK wrapper for AI providers
 │   ├── i18n.py                     # Internationalization (Observer pattern)
 │   ├── csv_analyzer.py             # CSV relevance scoring (LiteratureAnalyzer)
 │   ├── abstract_screener.py        # Title/abstract screening with verification
@@ -82,7 +82,7 @@ python -m pip install -e .
 
 # 2. Configure API keys
 cp .env.example .env
-# Edit .env and add OPENAI_API_KEY or GEMINI_API_KEY
+# Edit .env and add OPENAI_API_KEY or SILICONFLOW_API_KEY
 
 # 3. Verify installation
 python -m litrx --help
@@ -188,7 +188,7 @@ Configuration priority (low to high):
 **Key Functions**:
 - `load_env_file(path)`: Parse .env files
 - `load_config(path, defaults)`: Merge YAML/JSON with defaults
-- Configuration keys: `AI_SERVICE`, `MODEL_NAME`, `{OPENAI|GEMINI|SILICONFLOW}_API_KEY`, `API_BASE`, `LANGUAGE`, `ENABLE_VERIFICATION`
+- Configuration keys: `AI_SERVICE`, `MODEL_NAME`, `{OPENAI|SILICONFLOW}_API_KEY`, `API_BASE`, `LANGUAGE`, `ENABLE_VERIFICATION`
 
 ## Common Development Workflows
 
@@ -642,7 +642,7 @@ python -m pip install -e .
 **Solution 1** (GUI): Run `python run_gui.py` (auto-installs)
 **Solution 2** (Manual):
 ```bash
-python -m pip install pandas openai google-generativeai litellm tqdm openpyxl pyyaml pypdf
+python -m pip install pandas openai tqdm openpyxl pyyaml pypdf
 ```
 
 ### Issue: Configuration Not Loading
@@ -813,10 +813,9 @@ df.to_excel(output_path, index=False)
 
 | Key | Values | Purpose |
 |-----|--------|---------|
-| `AI_SERVICE` | openai, gemini, siliconflow | AI provider selection |
-| `MODEL_NAME` | gpt-4o, gemini-1.5-pro, etc. | Model identifier |
+| `AI_SERVICE` | openai, siliconflow | AI provider selection |
+| `MODEL_NAME` | gpt-4o, gpt-4-turbo, etc. | Model identifier |
 | `OPENAI_API_KEY` | sk-... | OpenAI API key |
-| `GEMINI_API_KEY` | ... | Google Gemini API key |
 | `SILICONFLOW_API_KEY` | ... | SiliconFlow API key |
 | `API_BASE` | URL | Custom API endpoint (optional) |
 | `LANGUAGE` | zh, en | UI language |
@@ -880,7 +879,7 @@ def _on_complete(self, result):
 - Literature matrix analysis (NEW - replaces PDF screening)
 - PDF screening (LEGACY)
 - Bilingual GUI (Chinese/English)
-- Multi-provider AI support (OpenAI, Gemini, SiliconFlow)
+- Multi-provider AI support (OpenAI, SiliconFlow)
 
 ### Known Limitations
 - Minimal test coverage (~5%)
