@@ -260,7 +260,7 @@ def main():
         config.update(user_cfg)
 
         print("\nInitializing analyzer...")
-        analyzer = LiteratureAnalyzer(config, questions, research_topic)
+        analyzer = LiteratureAnalyzer(config, research_topic, questions)
 
         print("Reading literature data...")
         df = analyzer.read_scopus_csv(file_path)
