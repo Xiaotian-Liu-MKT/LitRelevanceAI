@@ -1,9 +1,16 @@
-import json  # 用于解析JSON响应
+"""Abstract screening module with AI-assisted literature analysis.
+
+This module provides functionality for screening academic papers based on
+configurable questions and criteria, with optional verification workflow.
+"""
+
+import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-import sys  # 用于退出脚本
+import sys
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import openpyxl
 import pandas as pd
@@ -19,33 +26,69 @@ from .ai_client import AIClient
 
 load_env_file()
 
-# GUI 相关库在需要时才导入，避免在纯命令行环境中引入不必要依赖
 
-# 配置部分
+# Custom exceptions for better error handling
+class ColumnNotFoundError(Exception):
+    """Raised when required columns are not found in the data."""
+    pass
+
+
+class InvalidFileFormatError(Exception):
+    """Raised when file format is not supported."""
+    pass
+
+
+# Configuration defaults
 DEFAULT_CONFIG = {
     **BASE_CONFIG,
-    # 研究配置 - 研究问题可为空
-    'RESEARCH_QUESTION': '',  # 空表示通用筛选模式
-    'GENERAL_SCREENING_MODE': True,  # 是否启用通用筛选模式
+    # Research configuration
+    'RESEARCH_QUESTION': '',
+    'GENERAL_SCREENING_MODE': True,
 
-    # 数据文件配置
-    'INPUT_FILE_PATH': 'C:/Users/91784/Downloads/scopus (8).csv',  # 例如: 'data/scopus_export.xlsx'
+    # File configuration
+    'INPUT_FILE_PATH': '',
     'OUTPUT_FILE_SUFFIX': '_analyzed',
 
-    # 其他配置
+    # Processing configuration
     'API_REQUEST_DELAY': 1,
     'ENABLE_VERIFICATION': True,
+    'MAX_WORKERS': 3,  # Concurrent processing threads
     'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题'],
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
 
 
 def load_mode_questions(mode: str) -> Dict[str, Any]:
-    """Load questions for a given screening mode from questions_config.json."""
+    """Load questions for a given screening mode.
 
-    q_path = Path(__file__).resolve().parent.parent / "questions_config.json"
+    First tries to load from unified config (configs/abstract/{mode}.yaml),
+    then falls back to legacy format (questions_config.json).
+
+    Args:
+        mode: Screening mode name
+
+    Returns:
+        Dictionary with open_questions and yes_no_questions
+    """
+    # Try new unified config format
+    unified_path = Path(__file__).resolve().parent.parent / "configs" / "abstract" / f"{mode}.yaml"
+    if unified_path.exists():
+        try:
+            with unified_path.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                return {
+                    "open_questions": data.get("open_questions", []),
+                    "yes_no_questions": data.get("yes_no_questions", []),
+                    "prompts": data.get("prompts", {}),
+                    "settings": data.get("settings", {}),
+                }
+        except Exception as e:
+            print(f"警告: 加载统一配置失败: {e}")
+
+    # Fall back to legacy format
+    legacy_path = Path(__file__).resolve().parent.parent / "questions_config.json"
     try:
-        with q_path.open("r", encoding="utf-8") as f:
+        with legacy_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         return data.get(mode, {"open_questions": [], "yes_no_questions": []})
     except Exception:
@@ -87,41 +130,79 @@ def get_file_path_from_config(config):
         sys.exit(1)
     return file_path
 
-def load_and_validate_data(file_path, config):
+def load_and_validate_data(file_path, config, title_column=None, abstract_column=None):
+    """Load and validate data from CSV or Excel file.
+
+    Args:
+        file_path: Path to the data file
+        config: Configuration dictionary
+        title_column: Optional explicit title column name
+        abstract_column: Optional explicit abstract column name
+
+    Returns:
+        Tuple of (DataFrame, title_column_name, abstract_column_name)
+
+    Raises:
+        InvalidFileFormatError: If file format is not supported
+        ColumnNotFoundError: If required columns cannot be found
+        IOError: If file cannot be read
+    """
+    # Validate file format
+    if not (file_path.endswith('.csv') or file_path.endswith('.xlsx')):
+        raise InvalidFileFormatError(
+            f"不支持的文件格式。请使用 CSV 或 Excel 文件。\n"
+            f"当前文件: {file_path}"
+        )
+
+    # Load data
     try:
         if file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith('.xlsx'):
+            df = pd.read_csv(file_path, encoding='utf-8-sig')
+        else:
             df = pd.read_excel(file_path)
     except Exception as e:
-        print(f"读取文件 '{file_path}' 时出错: {e}")
-        sys.exit(1)
+        raise IOError(f"读取文件失败: {file_path}\n错误: {e}")
 
-    title_column = None
-    for col_name_variant in config['TITLE_COLUMN_VARIANTS']:
-        if col_name_variant in df.columns:
-            title_column = col_name_variant
-            break
-    abstract_column = None
-    for col_name_variant in config['ABSTRACT_COLUMN_VARIANTS']:
-        if col_name_variant in df.columns:
-            abstract_column = col_name_variant
-            break
+    # Auto-detect or validate title column
+    if title_column:
+        if title_column not in df.columns:
+            raise ColumnNotFoundError(
+                f"指定的标题列 '{title_column}' 不存在。\n"
+                f"可用列: {', '.join(df.columns)}"
+            )
+    else:
+        for col_name_variant in config['TITLE_COLUMN_VARIANTS']:
+            if col_name_variant in df.columns:
+                title_column = col_name_variant
+                break
+        if not title_column:
+            raise ColumnNotFoundError(
+                f"无法自动识别标题列。\n"
+                f"尝试过的列名: {', '.join(config['TITLE_COLUMN_VARIANTS'])}\n"
+                f"可用列: {', '.join(df.columns)}\n"
+                f"请在GUI中手动选择标题列。"
+            )
 
-    if not title_column:
-        print(f"警告：无法自动识别标题列。尝试过的名称：{config['TITLE_COLUMN_VARIANTS']}")
-        title_column_input = input("请手动输入标题列的准确名称: ").strip()
-        if title_column_input not in df.columns:
-            print(f"错误：输入的标题列 '{title_column_input}' 不存在于文件中。")
-            sys.exit(1)
-        title_column = title_column_input
-    if not abstract_column:
-        print(f"警告：无法自动识别摘要列。尝试过的名称：{config['ABSTRACT_COLUMN_VARIANTS']}")
-        abstract_column_input = input("请手动输入摘要列的准确名称: ").strip()
-        if abstract_column_input not in df.columns:
-            print(f"错误：输入的摘要列 '{abstract_column_input}' 不存在于文件中。")
-            sys.exit(1)
-        abstract_column = abstract_column_input
+    # Auto-detect or validate abstract column
+    if abstract_column:
+        if abstract_column not in df.columns:
+            raise ColumnNotFoundError(
+                f"指定的摘要列 '{abstract_column}' 不存在。\n"
+                f"可用列: {', '.join(df.columns)}"
+            )
+    else:
+        for col_name_variant in config['ABSTRACT_COLUMN_VARIANTS']:
+            if col_name_variant in df.columns:
+                abstract_column = col_name_variant
+                break
+        if not abstract_column:
+            raise ColumnNotFoundError(
+                f"无法自动识别摘要列。\n"
+                f"尝试过的列名: {', '.join(config['ABSTRACT_COLUMN_VARIANTS'])}\n"
+                f"可用列: {', '.join(df.columns)}\n"
+                f"请在GUI中手动选择摘要列。"
+            )
+
     print(f"成功识别列 - 标题: '{title_column}', 摘要: '{abstract_column}'")
     return df, title_column, abstract_column
 
@@ -404,46 +485,229 @@ def generate_weekly_summary(df, criteria_columns):
     return summary
 
 def analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config, client):
-    title = str(row[title_col]) if pd.notna(row[title_col]) else "无标题"
-    abstract = str(row[abstract_col]) if pd.notna(row[abstract_col]) else "无摘要"
+    """Analyze a single article (legacy function for backward compatibility)."""
+    screener = AbstractScreener(config, client)
+    return screener.analyze_single_article(
+        df, index, row, title_col, abstract_col, open_questions, yes_no_questions
+    )
 
-    if title == "无标题" and abstract == "无摘要":
-        print("警告：文章标题和摘要均缺失，跳过此条目。")
+
+# ==============================================================================
+# AbstractScreener Class
+# ==============================================================================
+
+class AbstractScreener:
+    """AI-assisted abstract screening with concurrent processing support.
+
+    This class encapsulates all logic for screening academic papers based on
+    configurable questions and criteria, with optional verification workflow.
+    """
+
+    def __init__(self, config: Dict[str, Any], client: Optional[AIClient] = None):
+        """Initialize the screener.
+
+        Args:
+            config: Configuration dictionary
+            client: Optional pre-initialized AIClient
+        """
+        self.config = config
+        self.client = client or AIClient(config)
+        self.prompts = load_prompts()
+
+    def analyze_single_article(
+        self,
+        df: pd.DataFrame,
+        index: int,
+        row: pd.Series,
+        title_col: str,
+        abstract_col: str,
+        open_questions: List[Dict],
+        yes_no_questions: List[Dict]
+    ) -> Dict[str, Any]:
+        """Analyze a single article.
+
+        Args:
+            df: DataFrame to store results
+            index: Row index in DataFrame
+            row: Row data
+            title_col: Title column name
+            abstract_col: Abstract column name
+            open_questions: List of open-ended questions
+            yes_no_questions: List of yes/no questions
+
+        Returns:
+            Dictionary with 'initial' and 'verification' results
+        """
+        title = str(row[title_col]) if pd.notna(row[title_col]) else "无标题"
+        abstract = str(row[abstract_col]) if pd.notna(row[abstract_col]) else "无摘要"
+
+        # Handle missing data
+        if title == "无标题" and abstract == "无摘要":
+            for q in open_questions:
+                df.at[index, q['column_name']] = "标题和摘要均缺失"
+            for q in yes_no_questions:
+                df.at[index, q['column_name']] = "无法处理"
+            return {}
+
+        # Get AI analysis
+        prompt = construct_flexible_prompt(
+            title, abstract, self.config, open_questions, yes_no_questions
+        )
+        ai_response_json_str = get_ai_response_with_retry(
+            prompt, self.client, self.config, open_questions, yes_no_questions
+        )
+        parsed_data = parse_ai_response_json(
+            ai_response_json_str, open_questions, yes_no_questions
+        )
+
+        # Store initial results
+        qa = parsed_data.get('quick_analysis', {})
         for q in open_questions:
-            df.at[index, q['column_name']] = "标题和摘要均缺失"
+            df.at[index, q['column_name']] = qa.get(q['key'], "信息缺失")
+
+        sr = parsed_data.get('screening_results', {})
         for q in yes_no_questions:
-            df.at[index, q['column_name']] = "无法处理"
-        return {}
+            df.at[index, q['column_name']] = sr.get(q['key'], "信息缺失")
 
-    prompt = construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions)
-    ai_response_json_str = get_ai_response_with_retry(prompt, client, config, open_questions, yes_no_questions)
-    parsed_data = parse_ai_response_json(ai_response_json_str, open_questions, yes_no_questions)
+        # Verification
+        verification = {}
+        if self.config.get('ENABLE_VERIFICATION', True):
+            verification = verify_ai_response(
+                title, abstract, parsed_data, self.client, open_questions, yes_no_questions
+            )
+            vqa = verification.get('quick_analysis', {})
+            for q in open_questions:
+                df.at[index, f"{q['column_name']}_verified"] = vqa.get(q['key'], "验证失败")
 
-    qa = parsed_data.get('quick_analysis', {})
-    for q in open_questions:
-        df.at[index, q['column_name']] = qa.get(q['key'], "信息缺失")
+            vsr = verification.get('screening_results', {})
+            for q in yes_no_questions:
+                df.at[index, f"{q['column_name']}_verified"] = vsr.get(q['key'], "验证失败")
+        else:
+            for q in open_questions:
+                df.at[index, f"{q['column_name']}_verified"] = '未验证'
+            for q in yes_no_questions:
+                df.at[index, f"{q['column_name']}_verified"] = '未验证'
 
-    sr = parsed_data.get('screening_results', {})
-    for q in yes_no_questions:
-        df.at[index, q['column_name']] = sr.get(q['key'], "信息缺失")
+        return {"initial": parsed_data, "verification": verification}
 
-    verification = {}
-    if config.get('ENABLE_VERIFICATION', True):
-        verification = verify_ai_response(title, abstract, parsed_data, client, open_questions, yes_no_questions)
-        vqa = verification.get('quick_analysis', {})
+    def analyze_batch_concurrent(
+        self,
+        df: pd.DataFrame,
+        title_col: str,
+        abstract_col: str,
+        open_questions: List[Dict],
+        yes_no_questions: List[Dict],
+        progress_callback: Optional[callable] = None,
+        stop_event: Optional[Any] = None
+    ) -> pd.DataFrame:
+        """Analyze multiple articles concurrently.
+
+        Args:
+            df: DataFrame with articles
+            title_col: Title column name
+            abstract_col: Abstract column name
+            open_questions: List of open-ended questions
+            yes_no_questions: List of yes/no questions
+            progress_callback: Optional callback(index, total, result)
+            stop_event: Optional threading.Event to stop processing
+
+        Returns:
+            DataFrame with analysis results
+        """
+        max_workers = self.config.get('MAX_WORKERS', 3)
+        total = len(df)
+
+        def process_article(index_row_tuple):
+            """Process a single article (for thread pool)."""
+            index, row = index_row_tuple
+            if stop_event and stop_event.is_set():
+                return index, None
+
+            result = self.analyze_single_article(
+                df, index, row, title_col, abstract_col,
+                open_questions, yes_no_questions
+            )
+
+            # Add delay to avoid rate limiting
+            time.sleep(self.config.get('API_REQUEST_DELAY', 1))
+            return index, result
+
+        # Process articles concurrently
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(process_article, (index, row)): index
+                for index, row in df.iterrows()
+            }
+
+            for future in as_completed(futures):
+                index, result = future.result()
+                if progress_callback:
+                    progress_callback(index, total, result)
+
+                if stop_event and stop_event.is_set():
+                    break
+
+        return df
+
+    def generate_statistics(
+        self,
+        df: pd.DataFrame,
+        open_questions: List[Dict],
+        yes_no_questions: List[Dict]
+    ) -> Dict[str, Any]:
+        """Generate statistics summary from screening results.
+
+        Args:
+            df: DataFrame with screening results
+            open_questions: List of open-ended questions
+            yes_no_questions: List of yes/no questions
+
+        Returns:
+            Dictionary with statistics
+        """
+        stats = {
+            'total_articles': len(df),
+            'verification_enabled': self.config.get('ENABLE_VERIFICATION', True),
+            'yes_no_results': {},
+            'open_question_stats': {}
+        }
+
+        # Statistics for yes/no questions
+        for q in yes_no_questions:
+            col = q['column_name']
+            if col in df.columns:
+                value_counts = df[col].value_counts()
+                stats['yes_no_results'][q['question']] = {
+                    '是': int(value_counts.get('是', 0)),
+                    '否': int(value_counts.get('否', 0)),
+                    '不确定': int(value_counts.get('不确定', 0)),
+                    '其他': int(len(df) - value_counts.get('是', 0) -
+                               value_counts.get('否', 0) -
+                               value_counts.get('不确定', 0))
+                }
+
+                # Verification stats if enabled
+                if self.config.get('ENABLE_VERIFICATION', True):
+                    vcol = f"{col}_verified"
+                    if vcol in df.columns:
+                        ver_counts = df[vcol].value_counts()
+                        stats['yes_no_results'][q['question']]['verification'] = {
+                            '已验证': int(ver_counts.get('是', 0)),
+                            '未验证': int(ver_counts.get('否', 0)),
+                            '不确定': int(ver_counts.get('不确定', 0)),
+                        }
+
+        # Statistics for open questions
         for q in open_questions:
-            df.at[index, f"{q['column_name']}_verified"] = vqa.get(q['key'], "验证失败")
+            col = q['column_name']
+            if col in df.columns:
+                non_empty = df[col].notna() & (df[col] != '') & (df[col] != '信息缺失')
+                stats['open_question_stats'][q['question']] = {
+                    'answered': int(non_empty.sum()),
+                    'missing': int((~non_empty).sum())
+                }
 
-        vsr = verification.get('screening_results', {})
-        for q in yes_no_questions:
-            df.at[index, f"{q['column_name']}_verified"] = vsr.get(q['key'], "验证失败")
-    else:
-        for q in open_questions:
-            df.at[index, f"{q['column_name']}_verified"] = '未验证'
-        for q in yes_no_questions:
-            df.at[index, f"{q['column_name']}_verified"] = '未验证'
-
-    return {"initial": parsed_data, "verification": verification}
+        return stats
 
 
 # --- 主程序 ---

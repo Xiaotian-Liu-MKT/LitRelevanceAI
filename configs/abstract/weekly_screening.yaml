@@ -1,0 +1,89 @@
+# Weekly Screening Mode Configuration
+# This file contains all configuration for the weekly screening mode
+
+# Mode metadata
+name: weekly_screening
+description: "每周文献快速筛选"
+
+# Open-ended questions
+open_questions:
+  - key: research_area
+    question: "这篇文献的主要研究领域是什么？"
+    column_name: "研究领域"
+
+  - key: methodology
+    question: "研究使用了什么主要方法？"
+    column_name: "研究方法"
+
+# Yes/No questions
+yes_no_questions:
+  - key: consumer_behavior
+    question: "这篇文献是否与消费者行为相关？"
+    column_name: "消费者行为相关"
+
+  - key: empirical_study
+    question: "这是否为实证研究？"
+    column_name: "实证研究"
+
+# Prompt templates
+prompts:
+  # Quick screening prompt (for general mode)
+  quick_prompt: |
+    请快速分析以下文献的标题和摘要,帮助进行每周文献筛选:
+
+    文献标题:{title}
+    文献摘要:{abstract}
+
+    请按以下JSON格式回答:
+    {{
+        "quick_analysis": {{
+    {open_q_str}
+        }},
+        "screening_results": {{
+    {yes_no_str}
+        }}
+    }}
+
+  # Detailed screening prompt (when research question is provided)
+  detailed_prompt: |
+    请仔细阅读以下文献的标题和摘要,并结合给定的理论模型/研究问题进行分析。
+    请严格按照以下JSON格式返回您的分析结果,所有文本内容请使用中文:
+
+    文献标题:{title}
+    文献摘要:{abstract}
+
+    理论模型/研究问题:{research_question}
+
+    JSON输出格式要求:
+    {{
+    {detailed_analysis_section}
+        "screening_results": {{
+    {criteria_prompts_str}
+        }}
+    }}
+
+    重要提示:
+    1.  对于 "detailed_analysis" 内的每一个子问题(如果存在),请提供简洁、针对性的中文回答。如果摘要中信息不足以回答某个子问题,请注明"摘要未提供相关信息"。
+    2.  对于 "screening_results" 中的每一个筛选条件,请仅使用 "是"、"否" 或 "不确定" 作为回答。
+    3.  确保整个输出是一个合法的JSON对象。
+
+  # Verification prompt
+  verification_prompt: |
+    请根据以下文献标题和摘要,核对AI之前的回答是否与文献内容一致。
+    文献标题:{title}
+    文献摘要:{abstract}
+
+    问题与AI初始回答如下:
+    {verification_data}
+
+    请判断每个回答是否得到标题或摘要支持。如支持回答"是",不支持回答"否",无法判断回答"不确定"。请按如下JSON格式返回:
+    {{
+        "quick_analysis": {{{open_keys}}},
+        "screening_results": {{{yes_no_keys}}}
+    }}
+
+# Processing settings
+settings:
+  max_workers: 3  # Concurrent processing threads
+  api_request_delay: 1  # Delay between API calls (seconds)
+  enable_verification: true  # Enable two-stage verification
