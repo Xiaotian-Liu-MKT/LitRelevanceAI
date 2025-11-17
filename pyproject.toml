@@ -12,8 +12,6 @@ requires-python = ">=3.8"
 dependencies = [
     "pandas",
     "openai",
-    "google-generativeai",
-    "litellm",
     "tqdm",
     "openpyxl",
     "pyyaml",

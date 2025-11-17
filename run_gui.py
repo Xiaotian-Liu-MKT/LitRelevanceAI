@@ -14,8 +14,6 @@ import sys
 DEPENDENCIES = {
     "pandas": "pandas",
     "openai": "openai",
-    "google-generativeai": "google.generativeai",
-    "litellm": "litellm",
     "tqdm": "tqdm",
     "openpyxl": "openpyxl",
     "pyyaml": "yaml",

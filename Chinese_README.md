@@ -11,7 +11,7 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
 - **PDF 筛选**：`litrx pdf` 会先将 PDF 转为文本再发送给模型，依据研究问题和筛选标准输出结构化结果。图形界面标签页会列出所选文件夹的 PDF、显示匹配的元数据与处理状态，可设置研究问题、筛选条件和输出格式，支持仅匹配元数据模式，并在完成后提示打开结果目录。
 - **模块化标签界面**：运行 `python run_gui.py`（或 `python -m litrx --gui`）可打开带有 CSV 相关性分析、摘要筛选和 PDF 筛选独立标签页的应用，脚本会在启动前自动安装缺失的依赖。
 - **GPT-5 与 o1 模型支持**：AI 客户端自动检测并使用 OpenAI 的新 Responses API 来调用 GPT-5 和 o1 系列模型，支持 `verbosity`（详细程度）和 `reasoning_effort`（推理努力程度）等高级参数。与现有代码无缝集成的同时提供增强的推理能力。详见 [GPT-5 使用指南](docs/GPT5_GUIDE.md)。
-- **灵活的模型配置**：可在脚本中自由切换 OpenAI（GPT-3.5、GPT-4、GPT-4o、GPT-5、o1 系列）或 Gemini，并调整温度、模型名称等参数。界面下拉菜单切换服务商时会自动更新 API 密钥字段并记住之前保存的密钥。
+- **灵活的模型配置**：可在脚本中自由切换 OpenAI 或 SiliconFlow，并调整温度、模型名称等参数。界面下拉菜单切换服务商时会自动更新 API 密钥字段并记住之前保存的密钥。
 - **统一的配置管理**：通过 `.env` 与 JSON/YAML 配置文件合并生成 `DEFAULT_CONFIG`，命令行参数可覆盖默认值。
 - **自动保存进度**：中间结果和最终结果都会写入带时间戳的 CSV 或 XLSX 文件，避免进度丢失。
 
@@ -23,7 +23,7 @@ AI 辅助的文献筛选工具，可评估学术论文与研究主题的相关�
    python -m pip install -e .
    ```
    如不需要编辑模式，可省略 `-e`。
-3. 复制 `.env.example` 为 `.env`，填写 `OPENAI_API_KEY` 或 `GEMINI_API_KEY`。
+3. 复制 `.env.example` 为 `.env`，填写 `OPENAI_API_KEY` 或 `SILICONFLOW_API_KEY`。
 
 ## 快速开始
 

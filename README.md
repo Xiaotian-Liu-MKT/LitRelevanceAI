@@ -11,7 +11,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results. The GUI tab lists selected PDFs with matched metadata and processing status, lets you set the research question, criteria, and output type, supports a metadata-only precheck, and can open the result folder when done.
 - **Modular tabbed GUI** – `python run_gui.py` (or `python -m litrx --gui`) launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening. The script auto-installs missing dependencies before starting.
 - **GPT-5 and o1 support** – The AI client automatically detects and uses OpenAI's new Responses API for GPT-5 and o1 models, with support for advanced parameters like `verbosity` and `reasoning_effort`. Works seamlessly with existing code while providing enhanced reasoning capabilities. See [GPT-5 Guide](docs/GPT5_GUIDE.md) for details.
-- **Flexible model support** – A settings dropdown lets you switch between OpenAI (GPT-3.5, GPT-4, GPT-4o, GPT-5, o1 series) and Gemini. The API key field updates to match the chosen provider and remembers previously entered keys, while model names and advanced parameters remain customizable in the scripts.
+- **Flexible model support** – A settings dropdown lets you switch between OpenAI and SiliconFlow. The API key field updates to match the chosen provider and remembers previously entered keys, while model names remain customizable in the scripts.
 - **Unified configuration** – `.env` values merge with JSON or YAML config files, and command-line options override the resulting `DEFAULT_CONFIG`.
 - **Automatic saving** – Interim and final results are written to CSV/XLSX files with timestamps so you never lose progress.
 
@@ -23,7 +23,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
    python -m pip install -e .
    ```
    The `-e` flag is optional; omit it to perform a standard install.
-3. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` or `GEMINI_API_KEY`.
+3. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` or `SILICONFLOW_API_KEY`.
 
 ## Quick Start
 

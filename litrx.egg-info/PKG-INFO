@@ -7,8 +7,6 @@ Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 Requires-Dist: pandas
 Requires-Dist: openai
-Requires-Dist: google-generativeai
-Requires-Dist: litellm
 Requires-Dist: tqdm
 Requires-Dist: openpyxl
 Requires-Dist: pyyaml
@@ -23,10 +21,11 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
 ## Features
 
 - **CSV relevance analysis** – `litrx csv` reads Scopus exports and scores each paper from 0–100 while explaining the connection to your research question. The GUI tab displays results in a sortable table, allows double-clicking to view full analyses, and can export the DataFrame.
-- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined per mode in `questions_config.json`. Each AI answer can undergo a second model check that confirms whether the title or abstract supports it. Enable or disable this via the `ENABLE_VERIFICATION` config flag or the GUI's “Enable verification” checkbox. Verification results populate `<column>_verified` fields (“supported/unsupported” or “未验证” when turned off), and the GUI log annotates summaries with ✔/✖ markers. A dropdown selects the mode, an **Add Mode** button creates new presets, the **Edit Questions** dialog modifies questions, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
+- **Configurable abstract screening** – `litrx abstract` applies yes/no criteria and open questions defined per mode in `questions_config.json`. Each AI answer can undergo a second model check that confirms whether the title or abstract supports it. Enable or disable this via the `ENABLE_VERIFICATION` config flag or the GUI's "Enable verification" checkbox. Verification results populate `<column>_verified` fields ("supported/unsupported" or "未验证" when turned off), and the GUI log annotates summaries with ✔/✖ markers. A dropdown selects the mode, an **Add Mode** button creates new presets, the **Edit Questions** dialog modifies questions, a **Stop** button cancels processing, and export controls save the DataFrame to CSV or Excel.
 - **PDF screening** – `litrx pdf` converts papers to text before sending them to the model, checks custom criteria and detailed questions, and saves structured results. The GUI tab lists selected PDFs with matched metadata and processing status, lets you set the research question, criteria, and output type, supports a metadata-only precheck, and can open the result folder when done.
 - **Modular tabbed GUI** – `python run_gui.py` (or `python -m litrx --gui`) launches an application with dedicated tabs for CSV analysis, abstract screening, and PDF screening. The script auto-installs missing dependencies before starting.
-- **Flexible model support** – A settings dropdown lets you switch between OpenAI and Gemini. The API key field updates to match the chosen provider and remembers previously entered keys, while model names and temperature remain customizable in the scripts.
+- **GPT-5 and o1 support** – The AI client automatically detects and uses OpenAI's new Responses API for GPT-5 and o1 models, with support for advanced parameters like `verbosity` and `reasoning_effort`. Works seamlessly with existing code while providing enhanced reasoning capabilities. See [GPT-5 Guide](docs/GPT5_GUIDE.md) for details.
+- **Flexible model support** – A settings dropdown lets you switch between OpenAI and SiliconFlow. The API key field updates to match the chosen provider and remembers previously entered keys, while model names remain customizable in the scripts.
 - **Unified configuration** – `.env` values merge with JSON or YAML config files, and command-line options override the resulting `DEFAULT_CONFIG`.
 - **Automatic saving** – Interim and final results are written to CSV/XLSX files with timestamps so you never lose progress.
 
@@ -38,7 +37,7 @@ An AI-assisted toolkit that evaluates how well academic papers match your resear
    python -m pip install -e .
    ```
    The `-e` flag is optional; omit it to perform a standard install.
-3. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` or `GEMINI_API_KEY`.
+3. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` or `SILICONFLOW_API_KEY`.
 
 ## Quick Start
 

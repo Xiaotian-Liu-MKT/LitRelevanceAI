@@ -58,7 +58,6 @@ class BaseWindow:
             "AI_SERVICE",
             "MODEL_NAME",
             "OPENAI_API_KEY",
-            "GEMINI_API_KEY",
             "SILICONFLOW_API_KEY",
             "API_BASE",
         ]:
@@ -92,7 +91,7 @@ class BaseWindow:
         service_menu = ttk.Combobox(
             self.row1,
             textvariable=self.service_var,
-            values=["openai", "gemini", "siliconflow"],
+            values=["openai", "siliconflow"],
             width=15,
             state="readonly",
         )
@@ -104,8 +103,6 @@ class BaseWindow:
         self.api_key_label.pack(side=tk.LEFT, padx=(0, 5))
         if self.current_service == "openai":
             initial_key = self.base_config.get("OPENAI_API_KEY", "")
-        elif self.current_service == "gemini":
-            initial_key = self.base_config.get("GEMINI_API_KEY", "")
         else:  # siliconflow
             initial_key = self.base_config.get("SILICONFLOW_API_KEY", "")
         self.api_key_var = tk.StringVar(value=initial_key)
@@ -219,8 +216,6 @@ class BaseWindow:
         api_key = self.api_key_var.get().strip()
         if service == "openai" and api_key:
             config["OPENAI_API_KEY"] = api_key
-        elif service == "gemini" and api_key:
-            config["GEMINI_API_KEY"] = api_key
         elif service == "siliconflow" and api_key:
             config["SILICONFLOW_API_KEY"] = api_key
         model = self.model_var.get().strip()
@@ -258,7 +253,6 @@ class BaseWindow:
                 "MODEL_NAME",
                 "API_BASE",
                 "OPENAI_API_KEY",
-                "GEMINI_API_KEY",
                 "SILICONFLOW_API_KEY",
                 "LANGUAGE",
             ]
@@ -278,8 +272,6 @@ class BaseWindow:
         # Save current API key before switching
         if self.current_service == "openai":
             self.base_config["OPENAI_API_KEY"] = self.api_key_var.get().strip()
-        elif self.current_service == "gemini":
-            self.base_config["GEMINI_API_KEY"] = self.api_key_var.get().strip()
         elif self.current_service == "siliconflow":
             self.base_config["SILICONFLOW_API_KEY"] = self.api_key_var.get().strip()
 
@@ -287,8 +279,6 @@ class BaseWindow:
         self.current_service = self.service_var.get()
         if self.current_service == "openai":
             self.api_key_var.set(self.base_config.get("OPENAI_API_KEY", ""))
-        elif self.current_service == "gemini":
-            self.api_key_var.set(self.base_config.get("GEMINI_API_KEY", ""))
         elif self.current_service == "siliconflow":
             self.api_key_var.set(self.base_config.get("SILICONFLOW_API_KEY", ""))
 

@@ -1,7 +1,5 @@
 pandas
 openai
-google-generativeai
-litellm
 tqdm
 openpyxl
 pyyaml
