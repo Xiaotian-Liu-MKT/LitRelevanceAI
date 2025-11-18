@@ -22,6 +22,7 @@ from .config import (
     load_config as base_load_config,
 )
 from .ai_client import AIClient
+from .constants import DEFAULT_MAX_WORKERS, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from .logging_config import get_logger
 from .utils import AIResponseParser
 
@@ -55,7 +56,7 @@ DEFAULT_CONFIG = {
     # Processing configuration
     'API_REQUEST_DELAY': 1,
     'ENABLE_VERIFICATION': True,
-    'MAX_WORKERS': 3,  # Concurrent processing threads
+    'MAX_WORKERS': DEFAULT_MAX_WORKERS,
     'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题'],
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
@@ -518,7 +519,7 @@ class AbstractScreener:
         self.config = config
         self.client = client or AIClient(config)
         self.prompts = load_prompts()
-        logger.debug(f"AbstractScreener initialized with max_workers={config.get('MAX_WORKERS', 3)}, verification={config.get('ENABLE_VERIFICATION', True)}")
+        logger.debug(f"AbstractScreener initialized with max_workers={config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)}, verification={config.get('ENABLE_VERIFICATION', True)}")
 
     def analyze_single_article(
         self,
@@ -691,7 +692,7 @@ class AbstractScreener:
         Returns:
             DataFrame with analysis results
         """
-        max_workers = self.config.get('MAX_WORKERS', 3)
+        max_workers = self.config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)
         total = len(df)
 
         logger.info(f"Starting concurrent analysis of {total} articles with {max_workers} workers")

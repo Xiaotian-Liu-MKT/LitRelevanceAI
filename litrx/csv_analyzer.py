@@ -17,6 +17,7 @@ from .config import (
 from .ai_client import AIClient
 from .progress_manager import ProgressManager, create_progress_manager
 from .cache import get_cache
+from .constants import CHECKPOINT_INTERVAL, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from .logging_config import get_logger
 from .utils import AIResponseParser, ColumnDetector
 
@@ -26,8 +27,8 @@ logger = get_logger(__name__)
 
 DEFAULT_CONFIG = {
     **BASE_CONFIG,
-    "MODEL_NAME": "gpt-4o-mini",
-    "TEMPERATURE": 0.3,
+    "MODEL_NAME": DEFAULT_MODEL,
+    "TEMPERATURE": DEFAULT_TEMPERATURE,
 }
 
 
@@ -217,8 +218,8 @@ Please return in the following JSON format:
                 if progress_callback:
                     progress_callback(idx, total, result)
 
-                # Save checkpoint after each successful analysis
-                if progress_mgr and i % 5 == 0:  # Checkpoint every 5 papers
+                # Save checkpoint periodically
+                if progress_mgr and i % CHECKPOINT_INTERVAL == 0:
                     progress_mgr.save_checkpoint(
                         df, idx,
                         metadata={

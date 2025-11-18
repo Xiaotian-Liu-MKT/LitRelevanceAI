@@ -47,6 +47,7 @@ from .config import (
     load_env_file,
 )
 from .ai_client import AIClient
+from .constants import TITLE_SIMILARITY_THRESHOLD, FUZZY_MATCH_MIN_SCORE
 from .utils import AIResponseParser
 
 
@@ -274,7 +275,7 @@ def build_pdf_metadata_mapping(
         DataFrame with matched metadata plus match status columns
     """
     id_columns = matching_config.get('id_columns', ['DOI', 'Title'])
-    title_threshold = matching_config.get('title_similarity_threshold', 80.0)
+    title_threshold = matching_config.get('title_similarity_threshold', TITLE_SIMILARITY_THRESHOLD)
     enable_parsing = matching_config.get('enable_filename_parsing', True)
 
     mapping_rows = []
