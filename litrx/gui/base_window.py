@@ -442,7 +442,7 @@ class BaseWindow:
         def save_prompts():
             try:
                 # Collect all prompt values from text widgets
-                updated_prompts = {}
+                updated_prompts: Dict[str, Dict[str, str]] = {}
                 for category, widgets in text_widgets.items():
                     updated_prompts[category] = {}
                     for key, text_widget in widgets.items():

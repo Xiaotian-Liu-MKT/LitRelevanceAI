@@ -4,7 +4,11 @@ Provides language support for Chinese and English.
 """
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Callable, Dict, List
+
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Translation dictionary
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
@@ -169,6 +173,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "error_read_file": "读取文件失败: {error}",
         "error_no_results": "没有可导出的结果",
         "error_analysis": "错误 {error}",
+
+        # AI Client error messages
+        "error_openai_key_missing": "OpenAI API密钥未配置。请在环境变量、.env文件或配置文件中设置OPENAI_API_KEY。",
+        "error_siliconflow_key_missing": "SiliconFlow API密钥未配置。请在环境变量、.env文件或配置文件中设置SILICONFLOW_API_KEY。",
+        "error_invalid_service": "无效的AI服务 '{service}'。必须是 'openai' 或 'siliconflow'。",
+        "error_ai_request_failed": "AI 请求失败: {error}",
 
         # Success messages
         "results_exported": "结果已导出",
@@ -341,6 +351,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "error_no_results": "No results to export",
         "error_analysis": "Error {error}",
 
+        # AI Client error messages
+        "error_openai_key_missing": "OpenAI API key is not configured. Please set OPENAI_API_KEY in environment variables, .env file, or config file.",
+        "error_siliconflow_key_missing": "SiliconFlow API key is not configured. Please set SILICONFLOW_API_KEY in environment variables, .env file, or config file.",
+        "error_invalid_service": "Invalid AI service '{service}'. Must be 'openai' or 'siliconflow'.",
+        "error_ai_request_failed": "AI request failed: {error}",
+
         # Success messages
         "results_exported": "Results exported successfully",
 
@@ -360,7 +376,7 @@ class I18n:
             default_language: Default language code ('zh' or 'en')
         """
         self._current_language = default_language
-        self._observers = []
+        self._observers: List[Callable[[], None]] = []
 
     @property
     def current_language(self) -> str:
@@ -426,7 +442,12 @@ class I18n:
             try:
                 callback()
             except Exception as e:
-                print(f"Error notifying observer: {e}")
+                # 使用 logger 而不是 print，包含完整堆栈跟踪
+                callback_name = getattr(callback, '__name__', repr(callback))
+                logger.error(
+                    f"Observer callback failed: {callback_name}",
+                    exc_info=True  # 包含完整堆栈跟踪
+                )
 
 # Global i18n instance
 _i18n_instance = None

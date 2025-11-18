@@ -90,12 +90,29 @@ class ResultCache:
             return cached_data['result']
 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
-            logger.warning(f"Invalid cache file {cache_key[:8]}...: {e}")
+            # Log detailed error information
+            logger.warning(
+                f"Invalid cache file detected - "
+                f"Key: {cache_key}, Path: {cache_path}, "
+                f"Error type: {type(e).__name__}, Message: {e}"
+            )
+
+            # Create backup before deletion
+            backup_path = cache_path.with_suffix('.json.corrupt')
+            try:
+                import shutil
+                shutil.copy2(cache_path, backup_path)
+                logger.info(f"Corrupted cache backed up to: {backup_path}")
+            except Exception as backup_error:
+                logger.error(f"Failed to backup corrupted cache: {backup_error}")
+
             # Delete corrupted cache
             try:
                 cache_path.unlink()
-            except Exception:
-                pass
+                logger.info(f"Corrupted cache deleted: {cache_path}")
+            except Exception as delete_error:
+                logger.error(f"Failed to delete corrupted cache: {delete_error}")
+
             return None
 
     def set(self, title: str, abstract: str, result: Dict[str, Any], questions: str = "") -> None:
@@ -144,10 +161,25 @@ class ResultCache:
                     if datetime.now() - cached_time > self.ttl:
                         cache_file.unlink()
                         removed_count += 1
-                except Exception:
+                        logger.debug(f"Removed expired cache: {cache_file.name}")
+                except Exception as e:
+                    # Log and backup corrupted files before deletion
+                    logger.warning(f"Corrupted cache file during cleanup: {cache_file}, Error: {e}")
+                    try:
+                        backup_path = cache_file.with_suffix('.json.corrupt')
+                        import shutil
+                        shutil.copy2(cache_file, backup_path)
+                        logger.info(f"Backed up corrupted cache to: {backup_path}")
+                    except Exception as backup_error:
+                        logger.error(f"Failed to backup during cleanup: {backup_error}")
+
                     # Delete corrupted files
-                    cache_file.unlink()
-                    removed_count += 1
+                    try:
+                        cache_file.unlink()
+                        removed_count += 1
+                        logger.debug(f"Removed corrupted cache: {cache_file.name}")
+                    except Exception as delete_error:
+                        logger.error(f"Failed to delete corrupted cache: {delete_error}")
 
         except Exception as e:
             logger.error(f"Error clearing cache: {e}")

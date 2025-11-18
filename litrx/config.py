@@ -106,7 +106,23 @@ class AIConfig(BaseModel):
 
     @model_validator(mode='after')
     def validate_service_has_key(self) -> 'AIConfig':
-        """Ensure the selected AI service has a corresponding API key."""
+        """Ensure the selected AI service has a corresponding API key.
+
+        Validation is skipped in test/development environments when LITRX_ENV
+        is set to 'test' or 'dev'.
+        """
+        import os
+        import logging
+
+        # 允许测试/开发环境跳过 API 密钥验证
+        env_mode = os.getenv('LITRX_ENV', '').lower()
+        if env_mode in ['test', 'dev', 'development']:
+            # 记录跳过验证（用于调试）
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Skipping API key validation in {env_mode} environment")
+            return self
+
+        # 生产环境：严格验证
         service_to_key = {
             'openai': ('OPENAI_API_KEY', self.OPENAI_API_KEY),
             'gemini': ('GEMINI_API_KEY', self.GEMINI_API_KEY),
@@ -123,7 +139,8 @@ class AIConfig(BaseModel):
                 f"  1. Environment variable: export {key_name}=your-key\n"
                 f"  2. .env file: {key_name}=your-key\n"
                 f"  3. Config file (~/.litrx_gui.yaml or configs/config.yaml)\n"
-                f"  4. System keyring (recommended for security)"
+                f"  4. System keyring (recommended for security)\n\n"
+                f"For testing/development, set: export LITRX_ENV=test"
             )
 
         return self

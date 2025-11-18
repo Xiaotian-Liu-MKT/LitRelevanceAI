@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import openpyxl
 import pandas as pd
@@ -22,7 +22,9 @@ from .config import (
     load_config as base_load_config,
 )
 from .ai_client import AIClient
+from .constants import DEFAULT_MAX_WORKERS, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from .logging_config import get_logger
+from .prompt_builder import PromptBuilder
 from .utils import AIResponseParser
 
 
@@ -55,7 +57,7 @@ DEFAULT_CONFIG = {
     # Processing configuration
     'API_REQUEST_DELAY': 1,
     'ENABLE_VERIFICATION': True,
-    'MAX_WORKERS': 3,  # Concurrent processing threads
+    'MAX_WORKERS': DEFAULT_MAX_WORKERS,
     'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题'],
     'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
 }
@@ -86,7 +88,7 @@ def load_mode_questions(mode: str) -> Dict[str, Any]:
                     "settings": data.get("settings", {}),
                 }
         except Exception as e:
-            print(f"警告: 加载统一配置失败: {e}")
+            logger.warning(f"警告: 加载统一配置失败: {e}")
 
     # Fall back to legacy format
     legacy_path = Path(__file__).resolve().parent.parent / "questions_config.json"
@@ -123,13 +125,13 @@ def load_config(path: Optional[str] = None, mode: Optional[str] = None) -> Tuple
 def get_file_path_from_config(config):
     file_path = config['INPUT_FILE_PATH']
     if not file_path or file_path == 'your_input_file.xlsx':
-         print("错误：输入文件路径未在CONFIG中正确配置。")
+         logger.error("错误：输入文件路径未在CONFIG中正确配置。")
          sys.exit(1)
     if not os.path.exists(file_path):
-        print(f"错误：配置文件中指定的文件路径 '{file_path}' 不存在。")
+        logger.error(f"错误：配置文件中指定的文件路径 '{file_path}' 不存在。")
         sys.exit(1)
     if not (file_path.endswith('.csv') or file_path.endswith('.xlsx')):
-        print(f"错误：文件 '{file_path}' 不是支持的CSV或Excel格式。")
+        logger.error(f"错误：文件 '{file_path}' 不是支持的CSV或Excel格式。")
         sys.exit(1)
     return file_path
 
@@ -206,7 +208,7 @@ def load_and_validate_data(file_path, config, title_column=None, abstract_column
                 f"请在GUI中手动选择摘要列。"
             )
 
-    print(f"成功识别列 - 标题: '{title_column}', 摘要: '{abstract_column}'")
+    logger.info(f"成功识别列 - 标题: '{title_column}', 摘要: '{abstract_column}'")
     return df, title_column, abstract_column
 
 def prepare_dataframe(df, open_questions, yes_no_questions):
@@ -219,83 +221,33 @@ def prepare_dataframe(df, open_questions, yes_no_questions):
     return df
 
 def construct_ai_prompt(title, abstract, research_question, screening_criteria, detailed_analysis_questions, prompts=None):
-    """Construct detailed analysis prompt using template."""
+    """Construct detailed analysis prompt using PromptBuilder."""
     if prompts is None:
         prompts = load_prompts()
 
-    criteria_prompts_str = ",\n".join([f'        "{criterion}": "请回答 \'是\', \'否\', 或 \'不确定\'"' for criterion in screening_criteria])
-
-    detailed_analysis_prompts_list = []
-    if detailed_analysis_questions: # 仅当定义了细化问题时才构建这部分
-        for q_config in detailed_analysis_questions:
-            detailed_analysis_prompts_list.append(f'        "{q_config["prompt_key"]}": "{q_config["question_text"]}"')
-    detailed_analysis_prompts_str = ",\n".join(detailed_analysis_prompts_list)
-
-    # 构建 detailed_analysis 部分，仅当存在细化问题时
-    detailed_analysis_section = ""
-    if detailed_analysis_prompts_str:
-        detailed_analysis_section = f"""
-    "detailed_analysis": {{
-{detailed_analysis_prompts_str}
-    }},""" # 注意这里末尾的逗号，如果 screening_results 存在则需要
-
-    # Use template from prompts_config.json or fall back to default
-    template = prompts.get("detailed_prompt", """请仔细阅读以下文献的标题和摘要,并结合给定的理论模型/研究问题进行分析。
-请严格按照以下JSON格式返回您的分析结果,所有文本内容请使用中文:
-
-文献标题:{title}
-文献摘要:{abstract}
-
-理论模型/研究问题:{research_question}
-
-JSON输出格式要求:
-{{
-{detailed_analysis_section}
-    "screening_results": {{
-{criteria_prompts_str}
-    }}
-}}
-
-重要提示:
-1.  对于 "detailed_analysis" 内的每一个子问题(如果存在),请提供简洁、针对性的中文回答。如果摘要中信息不足以回答某个子问题,请注明"摘要未提供相关信息"。
-2.  对于 "screening_results" 中的每一个筛选条件,请仅使用 "是"、"否" 或 "不确定" 作为回答。
-3.  确保整个输出是一个合法的JSON对象。
-""")
-
-    return template.format(
+    builder = PromptBuilder(prompts)
+    return builder.build_screening_prompt(
         title=title,
         abstract=abstract,
         research_question=research_question,
-        detailed_analysis_section=detailed_analysis_section,
-        criteria_prompts_str=criteria_prompts_str
+        criteria=screening_criteria,
+        detailed_questions=detailed_analysis_questions
     )
 
 
 def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions):
-    """Construct prompt using templates from prompts_config.json."""
+    """Construct prompt using PromptBuilder."""
     prompts = load_prompts()
+    builder = PromptBuilder(prompts)
 
     if config.get('GENERAL_SCREENING_MODE') or not config.get('RESEARCH_QUESTION'):
-        open_q_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in open_questions])
-        yes_no_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in yes_no_questions])
-
-        # Use template from prompts_config.json or fall back to default
-        template = prompts.get("quick_prompt", """请快速分析以下文献的标题和摘要,帮助进行每周文献筛选:
-
-文献标题:{title}
-文献摘要:{abstract}
-
-请按以下JSON格式回答:
-{{
-    "quick_analysis": {{
-{open_q_str}
-    }},
-    "screening_results": {{
-{yes_no_str}
-    }}
-}}""")
-
-        return template.format(title=title, abstract=abstract, open_q_str=open_q_str, yes_no_str=yes_no_str)
+        return builder.build_flexible_prompt(
+            title=title,
+            abstract=abstract,
+            open_questions=open_questions,
+            yes_no_questions=yes_no_questions,
+            general_mode=True
+        )
     else:
         screening_criteria = [q['question'] for q in yes_no_questions]
         detailed = [{'prompt_key': q['key'], 'question_text': q['question'], 'df_column_name': q['column_name']} for q in open_questions]
@@ -303,7 +255,7 @@ def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_qu
 
 def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_no_questions, max_retries=3):
     def build_error_response(msg):
-        data = {"quick_analysis": {}, "screening_results": {}}
+        data: Dict[str, Dict[str, str]] = {"quick_analysis": {}, "screening_results": {}}
         for q in open_questions:
             data["quick_analysis"][q['key']] = msg
         for q in yes_no_questions:
@@ -319,7 +271,7 @@ def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_
             )
             return response['choices'][0]['message']['content'].strip()
         except Exception as e:
-            print(f"第 {attempt + 1} 次尝试失败: {e}")
+            logger.warning(f"第 {attempt + 1} 次尝试失败: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
             else:
@@ -443,7 +395,7 @@ def verify_ai_response(title, abstract, initial_json, client, open_questions, ye
         content = response["choices"][0]["message"]["content"].strip()
         return parse_ai_response_json(content, open_questions, yes_no_questions)
     except Exception as e:
-        print(f"验证AI响应失败: {e}")
+        logger.error(f"验证AI响应失败: {e}")
         return {
             "quick_analysis": {q["key"]: "验证失败" for q in open_questions},
             "screening_results": {q["key"]: "验证失败" for q in yes_no_questions},
@@ -518,7 +470,7 @@ class AbstractScreener:
         self.config = config
         self.client = client or AIClient(config)
         self.prompts = load_prompts()
-        logger.debug(f"AbstractScreener initialized with max_workers={config.get('MAX_WORKERS', 3)}, verification={config.get('ENABLE_VERIFICATION', True)}")
+        logger.debug(f"AbstractScreener initialized with max_workers={config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)}, verification={config.get('ENABLE_VERIFICATION', True)}")
 
     def analyze_single_article(
         self,
@@ -671,7 +623,7 @@ class AbstractScreener:
         abstract_col: str,
         open_questions: List[Dict],
         yes_no_questions: List[Dict],
-        progress_callback: Optional[callable] = None,
+        progress_callback: Optional[Callable[[int, int, Optional[Dict[str, Any]]], None]] = None,
         stop_event: Optional[Any] = None
     ) -> pd.DataFrame:
         """Analyze multiple articles concurrently.
@@ -691,7 +643,7 @@ class AbstractScreener:
         Returns:
             DataFrame with analysis results
         """
-        max_workers = self.config.get('MAX_WORKERS', 3)
+        max_workers = self.config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)
         total = len(df)
 
         logger.info(f"Starting concurrent analysis of {total} articles with {max_workers} workers")
@@ -808,17 +760,17 @@ class AbstractScreener:
 
 # --- 主程序 ---
 def main():
-    print("--- AI辅助文献分析脚本启动 ---")
+    logger.info("--- AI辅助文献分析脚本启动 ---")
 
     config, questions = load_config()
 
-    print("正在初始化AI客户端...")
+    logger.info("正在初始化AI客户端...")
     client = AIClient(config)
 
     open_questions = questions.get('open_questions', [])
     yes_no_questions = questions.get('yes_no_questions', [])
 
-    print("正在加载数据文件...")
+    logger.info("正在加载数据文件...")
     input_file_path = get_file_path_from_config(config)
     df, title_col, abstract_col = load_and_validate_data(input_file_path, config)
 
@@ -831,16 +783,16 @@ def main():
     if os.path.exists(temp_path):
         try:
             df = pd.read_csv(temp_path) if temp_path.endswith('.csv') else pd.read_excel(temp_path)
-            print("已加载临时进度文件。")
+            logger.info("已加载临时进度文件。")
         except Exception as e:
-            print(f"加载临时文件失败: {e}")
+            logger.error(f"加载临时文件失败: {e}")
 
     start_index = resume_from_progress(output_file_path)
     total_articles = len(df)
-    print(f"共找到 {total_articles} 篇文章待处理。")
+    logger.info(f"共找到 {total_articles} 篇文章待处理。")
 
     for index, row in df.iloc[start_index:].iterrows():
-        print(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
+        logger.info(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
         analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config, client)
         save_progress(df, output_file_path, index)
         time.sleep(config['API_REQUEST_DELAY'])
@@ -850,9 +802,9 @@ def main():
             df.to_csv(output_file_path, index=False, encoding='utf-8-sig')
         elif output_file_path.endswith('.xlsx'):
             df.to_excel(output_file_path, index=False, engine='openpyxl')
-        print(f"\n处理完成！结果已保存到: {output_file_path}")
+        logger.info(f"\n处理完成！结果已保存到: {output_file_path}")
     except Exception as e:
-        print(f"保存结果文件时出错: {e}")
+        logger.error(f"保存结果文件时出错: {e}")
 
     if os.path.exists(temp_path):
         os.remove(temp_path)
@@ -862,9 +814,9 @@ def main():
 
     criteria_columns = [q['column_name'] for q in yes_no_questions]
     summary = generate_weekly_summary(df, criteria_columns)
-    print("筛选摘要：", summary)
+    logger.info(f"筛选摘要： {summary}")
 
-    print("--- 脚本执行完毕 ---")
+    logger.info("--- 脚本执行完毕 ---")
 
 def run_gui():
     """创建增强的GUI界面"""

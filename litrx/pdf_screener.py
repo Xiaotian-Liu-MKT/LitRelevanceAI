@@ -42,10 +42,12 @@ from .config import (
     load_env_file,
 )
 from .ai_client import AIClient
+from .logging_config import get_logger
 from .utils import AIResponseParser
 
 
 load_env_file()
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -200,12 +202,12 @@ def parse_ai_response_json(
 ) -> Dict[str, Dict[str, str]]:
     """Parse the JSON response with fallback, ensuring all keys exist."""
 
-    final = {"detailed_analysis": {}, "screening_results": {}}
+    final: Dict[str, Dict[str, str]] = {"detailed_analysis": {}, "screening_results": {}}
     try:
         # Use unified parser with markdown cleaning and regex fallback
         data = AIResponseParser.parse_json_with_fallback(ai_json_string)
     except (json.JSONDecodeError, ValueError) as e:
-        print(f"JSON解析失败: {e}")
+        logger.error(f"JSON解析失败: {e}")
         for q in detailed_questions:
             final["detailed_analysis"][q["prompt_key"]] = "解析失败"
         for c in criteria_list:
@@ -249,12 +251,12 @@ def main() -> None:
 
     pdf_folder = config.get("INPUT_PDF_FOLDER_PATH")
     if not pdf_folder or not os.path.isdir(pdf_folder):
-        print("错误：未提供有效的PDF文件夹路径。")
+        logger.error("错误：未提供有效的PDF文件夹路径。")
         sys.exit(1)
 
     pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith(".pdf")]
     if not pdf_files:
-        print("在指定文件夹中未找到PDF文件。")
+        logger.warning("在指定文件夹中未找到PDF文件。")
         sys.exit(0)
 
     metadata_path = config.get("METADATA_FILE_PATH")
@@ -266,9 +268,9 @@ def main() -> None:
             )
             map_path = os.path.join(pdf_folder, "pdf_metadata_mapping.csv")
             mapping_df.to_csv(map_path, index=False, encoding="utf-8-sig")
-            print(f"已生成PDF与元数据映射表: {map_path}")
+            logger.info(f"已生成PDF与元数据映射表: {map_path}")
         except Exception as e:
-            print(f"元数据匹配失败: {e}")
+            logger.error(f"元数据匹配失败: {e}")
 
     base_prompt = construct_ai_prompt_instructions(
         research_question, criteria_list, detailed_questions
@@ -298,4 +300,4 @@ def main() -> None:
         df.to_csv(output_path, index=False, encoding="utf-8-sig")
     else:
         df.to_excel(output_path, index=False, engine="openpyxl")
-    print(f"处理完成，结果已保存到 {output_path}")
+    logger.info(f"处理完成，结果已保存到 {output_path}")
