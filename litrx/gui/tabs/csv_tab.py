@@ -10,6 +10,7 @@ import pandas as pd
 
 from ...csv_analyzer import LiteratureAnalyzer
 from ...i18n import t, get_i18n
+from ...task_manager import CancellableTask, TaskCancelledException
 
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from ..base_window import BaseWindow
@@ -42,8 +43,13 @@ class CsvTab:
         )
         self.browse_btn.pack(side=tk.LEFT, padx=5)
 
-        self.start_btn = ttk.Button(self.frame, text=t("start_analysis"), command=self.start_analysis)
-        self.start_btn.pack(pady=5)
+        # Action buttons frame
+        btn_frame = ttk.Frame(self.frame)
+        btn_frame.pack(pady=5)
+        self.start_btn = ttk.Button(btn_frame, text=t("start_analysis"), command=self.start_analysis)
+        self.start_btn.pack(side=tk.LEFT, padx=5)
+        self.stop_btn = ttk.Button(btn_frame, text=t("stop_task"), command=self.stop_analysis, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
 
         self.progress = tk.DoubleVar()
         ttk.Progressbar(self.frame, variable=self.progress, maximum=100).pack(fill=tk.X, padx=5, pady=5)
@@ -69,6 +75,7 @@ class CsvTab:
 
         self.df: Optional[pd.DataFrame] = None
         self.analyzer: Optional[LiteratureAnalyzer] = None
+        self.current_task: Optional[CancellableTask] = None
 
         # Register for language change notifications
         get_i18n().add_observer(self.update_language)
@@ -89,6 +96,7 @@ class CsvTab:
         # Update buttons
         self.browse_btn.config(text=t("browse"))
         self.start_btn.config(text=t("start_analysis"))
+        self.stop_btn.config(text=t("stop_task"))
         self.export_btn.config(text=t("export_results"))
 
         # Update tree headings
@@ -104,44 +112,122 @@ class CsvTab:
     # Analysis
     # ------------------------------------------------------------------
     def start_analysis(self) -> None:
+        """Start CSV analysis with cancellation support."""
         path = self.file_var.get()
         topic = self.topic_var.get()
         if not path or not topic:
             messagebox.showerror(t("error"), t("error_fill_fields"))
             return
+
+        # Initialize UI state
         self.export_btn.config(state=tk.DISABLED)
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
         self.progress.set(0)
         self.df = None
         self.analyzer = None
         for item in self.tree.get_children():
             self.tree.delete(item)
+
+        # Create cancellable task
+        self.current_task = CancellableTask()
+
+        # Start processing in background thread
         threading.Thread(target=self.process_csv, args=(path, topic), daemon=True).start()
 
+    def stop_analysis(self) -> None:
+        """Stop the current analysis task."""
+        if self.current_task:
+            self.current_task.cancel()
+            self.stop_btn.config(state=tk.DISABLED)
+
     def process_csv(self, path: str, topic: str) -> None:
+        """Process CSV file with thread-safe DataFrame updates and cancellation support.
+
+        This method runs in a worker thread. All DataFrame modifications
+        are applied through root.after() to ensure thread safety.
+        """
         config = self.app.build_config()
         analyzer = LiteratureAnalyzer(config, topic)
+
+        def restore_buttons():
+            """Restore button states after task completion."""
+            self.start_btn.config(state=tk.NORMAL)
+            self.stop_btn.config(state=tk.DISABLED)
+
         try:
             df = analyzer.read_scopus_csv(path)
         except Exception as e:  # pragma: no cover - UI feedback
             self.app.root.after(0, lambda: messagebox.showerror(t("error"), t("error_read_file", error=str(e))))
+            self.app.root.after(0, restore_buttons)
             return
 
         self.df = df
         self.analyzer = analyzer
         total = len(df)
-        for i, (idx, row) in enumerate(df.iterrows(), start=1):
-            try:
-                res = analyzer.analyze_paper(row['Title'], row['Abstract'])
-                df.at[idx, 'Relevance Score'] = res['relevance_score']
-                df.at[idx, 'Analysis Result'] = res['analysis']
-                df.at[idx, 'Literature Review Suggestion'] = res.get('literature_review_suggestion', '')
-                summary = res['analysis'].replace('\n', ' ')[:80]
-                self.app.root.after(0, self.update_row, idx, row['Title'], res['relevance_score'], summary)
-            except Exception as e:  # pragma: no cover - UI feedback
-                error_msg = t("error_analysis", error=str(e))
-                self.app.root.after(0, self.update_row, idx, row['Title'], '', error_msg)
-            self.app.root.after(0, lambda v=i / total * 100: self.progress.set(v))
-        self.app.root.after(0, lambda: self.export_btn.config(state=tk.NORMAL))
+
+        # Define progress callback for thread-safe updates
+        def progress_callback(idx, total_papers, result):
+            """Called from worker thread - schedules UI updates on main thread."""
+            if result is None:
+                # Paper skipped due to missing data
+                return
+
+            # Apply result to DataFrame in main thread (thread-safe)
+            def apply_update():
+                analyzer.apply_result_to_dataframe(df, idx, result)
+                summary = result['analysis'].replace('\n', ' ')[:80]
+                self.update_row(idx, result['title'], result['relevance_score'], summary)
+
+            self.app.root.after(0, apply_update)
+
+        try:
+            # Process all papers with cancellation checks
+            for i, (idx, row) in enumerate(df.iterrows(), start=1):
+                # Check for cancellation
+                if self.current_task and self.current_task.is_cancelled():
+                    self.app.root.after(0, lambda: messagebox.showinfo(
+                        t("hint"),
+                        t("task_stopped")
+                    ))
+                    break
+
+                try:
+                    res = analyzer.analyze_paper(row['Title'], row['Abstract'])
+                    res['title'] = row['Title']
+                    res['index'] = idx
+
+                    # Schedule DataFrame update and UI update on main thread
+                    progress_callback(idx, total, res)
+
+                except Exception as e:  # pragma: no cover - UI feedback
+                    error_msg = t("error_analysis", error=str(e))
+                    self.app.root.after(0, self.update_row, idx, row['Title'], '', error_msg)
+
+                # Update progress bar
+                self.app.root.after(0, lambda v=i / total * 100: self.progress.set(v))
+
+            # Enable export button when done (only if not cancelled)
+            if not (self.current_task and self.current_task.is_cancelled()):
+                self.app.root.after(0, lambda: self.export_btn.config(state=tk.NORMAL))
+
+        except TaskCancelledException:
+            # Task was cancelled
+            self.app.root.after(0, lambda: messagebox.showinfo(
+                t("hint"),
+                t("task_stopped")
+            ))
+
+        except Exception as e:
+            # Unexpected error
+            self.app.root.after(0, lambda: messagebox.showerror(
+                t("error"),
+                f"{t('error_analysis', error=str(e))}"
+            ))
+
+        finally:
+            # Always restore button states
+            self.app.root.after(0, restore_buttons)
 
     def update_row(self, idx: int, title: str, score: float | str, analysis: str) -> None:
         iid = str(idx)

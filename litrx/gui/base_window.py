@@ -14,6 +14,12 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - handle missing pyyaml
     yaml = None
 
+try:
+    from ..key_manager import get_key_manager, KEY_OPENAI, KEY_SILICONFLOW
+    KEYRING_AVAILABLE = True
+except ImportError:
+    KEYRING_AVAILABLE = False
+
 # Load environment variables from .env so they can override other sources
 load_env_file()
 
@@ -53,7 +59,22 @@ class BaseWindow:
         # Configure modern styling
         self.setup_styles()
 
-        # Environment variables have higher priority than persisted config
+        # Load API keys from keyring (secure storage)
+        if KEYRING_AVAILABLE:
+            key_manager = get_key_manager()
+
+            # Load keys from keyring if not already in config
+            if not self.base_config.get("OPENAI_API_KEY"):
+                openai_key = key_manager.get_key(KEY_OPENAI)
+                if openai_key:
+                    self.base_config["OPENAI_API_KEY"] = openai_key
+
+            if not self.base_config.get("SILICONFLOW_API_KEY"):
+                siliconflow_key = key_manager.get_key(KEY_SILICONFLOW)
+                if siliconflow_key:
+                    self.base_config["SILICONFLOW_API_KEY"] = siliconflow_key
+
+        # Environment variables have highest priority
         for key in [
             "AI_SERVICE",
             "MODEL_NAME",
@@ -237,7 +258,11 @@ class BaseWindow:
             var.set(path)
 
     def save_config(self) -> None:
-        """Persist current configuration to ``~/.litrx_gui.yaml``."""
+        """Persist current configuration to ``~/.litrx_gui.yaml``.
+
+        API keys are now stored securely in the system keyring instead of
+        the YAML file for improved security.
+        """
 
         config = self.build_config()
         if yaml is None:
@@ -246,17 +271,47 @@ class BaseWindow:
             )
             return
 
+        # Save API keys to secure keyring
+        if KEYRING_AVAILABLE:
+            key_manager = get_key_manager()
+
+            # Save OpenAI key to keyring
+            openai_key = config.get("OPENAI_API_KEY", "")
+            if openai_key:
+                key_manager.set_key(KEY_OPENAI, openai_key)
+
+            # Save SiliconFlow key to keyring
+            siliconflow_key = config.get("SILICONFLOW_API_KEY", "")
+            if siliconflow_key:
+                key_manager.set_key(KEY_SILICONFLOW, siliconflow_key)
+
+        # Save non-sensitive config to YAML (excluding API keys)
         data = {
             key: config.get(key, "")
             for key in [
                 "AI_SERVICE",
                 "MODEL_NAME",
                 "API_BASE",
-                "OPENAI_API_KEY",
-                "SILICONFLOW_API_KEY",
                 "LANGUAGE",
             ]
         }
+
+        # Migrate: if old config has plaintext keys, try to migrate them
+        try:
+            if PERSIST_PATH.exists():
+                with PERSIST_PATH.open("r", encoding="utf-8") as f:
+                    old_config = yaml.safe_load(f) or {}
+                if KEYRING_AVAILABLE and (
+                    old_config.get("OPENAI_API_KEY") or old_config.get("SILICONFLOW_API_KEY")
+                ):
+                    key_manager = get_key_manager()
+                    # Migrate old plaintext keys to keyring
+                    if old_config.get("OPENAI_API_KEY"):
+                        key_manager.set_key(KEY_OPENAI, old_config["OPENAI_API_KEY"])
+                    if old_config.get("SILICONFLOW_API_KEY"):
+                        key_manager.set_key(KEY_SILICONFLOW, old_config["SILICONFLOW_API_KEY"])
+        except Exception:
+            pass  # Migration is best-effort
 
         try:
             with PERSIST_PATH.open("w", encoding="utf-8") as f:
@@ -264,9 +319,19 @@ class BaseWindow:
         except Exception as e:  # pragma: no cover - user feedback
             messagebox.showerror(t("error"), t("save_failed", error=str(e)))
         else:  # pragma: no cover - user feedback
-            messagebox.showinfo(
-                t("saved"), t("config_saved", path=str(PERSIST_PATH))
-            )
+            if KEYRING_AVAILABLE:
+                messagebox.showinfo(
+                    t("saved"),
+                    t("config_saved", path=str(PERSIST_PATH)) +
+                    "\n\n" + t("api_keys_secured")
+                )
+            else:
+                messagebox.showwarning(
+                    t("saved"),
+                    t("config_saved", path=str(PERSIST_PATH)) +
+                    "\n\nWarning: keyring library not available. API keys cannot be stored securely. "
+                    "Please install keyring: pip install keyring"
+                )
 
     def on_service_change(self, event=None) -> None:
         # Save current API key before switching

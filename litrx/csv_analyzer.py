@@ -15,6 +15,7 @@ from .config import (
     load_config as base_load_config,
 )
 from .ai_client import AIClient
+from .progress_manager import ProgressManager, create_progress_manager
 
 
 load_env_file()
@@ -145,43 +146,120 @@ Please return in the following JSON format:
                 }
         except Exception as e:
             raise Exception(f"Failed to analyze paper: {str(e)}")
-    def batch_analyze(self, df: pd.DataFrame, original_file_path: str) -> List[Dict]:
-        """Batch analyze multiple papers"""
+    def batch_analyze(self, df: pd.DataFrame, original_file_path: str, progress_callback=None, use_checkpoint=True) -> List[Dict]:
+        """Batch analyze multiple papers with thread-safe updates and progress checkpoints.
+
+        Args:
+            df: DataFrame to analyze
+            original_file_path: Path to save results
+            progress_callback: Optional callback(index, total, result) for progress updates
+            use_checkpoint: Whether to use checkpoint system (default: True)
+
+        Returns:
+            List of analysis results
+        """
         results = []
         total = len(df)
 
+        # Set up progress manager for checkpointing
+        progress_mgr = None
+        if use_checkpoint:
+            progress_mgr = create_progress_manager(original_file_path, suffix="_analyzed")
+
+            # Check for existing checkpoint
+            if progress_mgr.has_checkpoint():
+                print("\n" + "="*60)
+                print(progress_mgr.get_resume_prompt())
+                print("="*60)
+                # For CLI, ask user; for GUI, this should be handled by caller
+                # For now, auto-resume in CLI mode
+                checkpoint_df = progress_mgr.load_dataframe()
+                checkpoint_meta = progress_mgr.load_checkpoint()
+                if checkpoint_df is not None and checkpoint_meta:
+                    print("Resuming from checkpoint...")
+                    df = checkpoint_df
+                    start_idx = checkpoint_meta.get('last_index', 0)
+                    print(f"Resuming from row {start_idx}")
+                else:
+                    start_idx = 0
+            else:
+                start_idx = 0
+        else:
+            start_idx = 0
+
         try:
             for i, (idx, row) in enumerate(df.iterrows(), start=1):
+                # Skip already processed rows
+                if idx < start_idx:
+                    continue
+
                 print(f"\nAnalyzing paper {i}/{total}...")
                 print(f"Title: {row['Title']}")
 
                 if pd.isna(row['Title']) or pd.isna(row['Abstract']):
                     print(f"Warning: The title or abstract of this paper is empty, skipped")
+                    if progress_callback:
+                        progress_callback(idx, total, None)
                     continue
 
                 result = self.analyze_paper(row['Title'], row['Abstract'])
                 result['title'] = row['Title']
+                result['index'] = idx  # Store index for later update
                 results.append(result)
 
                 print(f"Relevance Score: {result['relevance_score']}")
                 print(f"Analysis Result: {result['analysis'][:200]}...")
 
-                # Update the original CSV file in real-time
-                df.at[idx, 'Relevance Score'] = result['relevance_score']
-                df.at[idx, 'Analysis Result'] = result['analysis']
-                df.at[idx, 'Literature Review Suggestion'] = result.get('literature_review_suggestion', '')
+                # Apply result to DataFrame
+                self.apply_result_to_dataframe(df, idx, result)
 
-                # Save the state after each analysis
-                self.save_results(df, original_file_path, is_interim=True)
-                
+                # Notify progress callback
+                if progress_callback:
+                    progress_callback(idx, total, result)
+
+                # Save checkpoint after each successful analysis
+                if progress_mgr and i % 5 == 0:  # Checkpoint every 5 papers
+                    progress_mgr.save_checkpoint(
+                        df, idx,
+                        metadata={
+                            'research_topic': self.research_topic,
+                            'progress_percent': (i / total) * 100
+                        }
+                    )
+
                 time.sleep(1)
+
         except KeyboardInterrupt:
-            print("\nProgram interrupted by user. Saving completed analysis results...")
+            print("\nProgram interrupted by user. Saving checkpoint...")
+            if progress_mgr:
+                progress_mgr.save_checkpoint(df, idx, metadata={'interrupted': True})
+        except Exception as e:
+            print(f"\nError during analysis: {e}")
+            if progress_mgr:
+                progress_mgr.save_checkpoint(df, idx, metadata={'error': str(e)})
+            raise
         finally:
+            # Save final results
             if len(results) > 0:
-                self.save_results(df, original_file_path)  # Use the provided file path
+                if progress_mgr:
+                    progress_mgr.finalize_results(df)
+                    print(f"\nAnalysis complete! Results saved to: {progress_mgr.output_path}")
+                else:
+                    self.save_results(df, original_file_path)
 
         return results
+
+    def apply_result_to_dataframe(self, df: pd.DataFrame, index: int, result: Dict) -> None:
+        """Apply a single analysis result to DataFrame (thread-safe when called from main thread).
+
+        Args:
+            df: DataFrame to update
+            index: Row index
+            result: Analysis result dictionary
+        """
+        df.at[index, 'Relevance Score'] = result['relevance_score']
+        df.at[index, 'Analysis Result'] = result['analysis']
+        df.at[index, 'Literature Review Suggestion'] = result.get('literature_review_suggestion', '')
 
     def save_results(self, df: pd.DataFrame, original_file_path: str, is_interim=False):
         """Save analysis results to CSV file"""
