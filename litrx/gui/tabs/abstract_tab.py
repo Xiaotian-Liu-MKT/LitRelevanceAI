@@ -21,6 +21,7 @@ from ...abstract_screener import (
     InvalidFileFormatError,
     DEFAULT_CONFIG as ABSTRACT_CONFIG,
 )
+from ...i18n import get_i18n, t
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..base_window import BaseWindow
@@ -31,67 +32,80 @@ class AbstractTab:
 
     def __init__(self, app: BaseWindow) -> None:
         self.app = app
-        frame = ttk.Frame(app.notebook)
-        app.notebook.add(frame, text="摘要筛选")
+        self.frame = ttk.Frame(app.notebook)
+        self.tab_index = app.notebook.index("end")
+        app.notebook.add(self.frame, text=t("abstract_tab"))
 
         # Left panel - Controls
-        left_panel = ttk.Frame(frame)
+        left_panel = ttk.Frame(self.frame)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, padx=5, pady=5)
 
         # File selection
-        ttk.Label(left_panel, text="选择CSV/XLSX文件:").pack(anchor=tk.W, pady=2)
+        self.file_label = ttk.Label(left_panel, text=t("select_file_label"))
+        self.file_label.pack(anchor=tk.W, pady=2)
         file_frame = ttk.Frame(left_panel)
         file_frame.pack(fill=tk.X, pady=2)
         self.file_var = tk.StringVar()
         ttk.Entry(file_frame, textvariable=self.file_var, width=40).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(
+        self.browse_btn = ttk.Button(
             file_frame,
-            text="浏览",
+            text=t("browse"),
             command=lambda: self.app.browse_file(self.file_var, ("CSV or Excel", "*.csv *.xlsx")),
-        ).pack(side=tk.LEFT, padx=5)
+        )
+        self.browse_btn.pack(side=tk.LEFT, padx=5)
 
         # Mode selection
-        ttk.Label(left_panel, text="筛选模式:").pack(anchor=tk.W, pady=(8, 2))
+        self.mode_label = ttk.Label(left_panel, text=t("screening_mode_label"))
+        self.mode_label.pack(anchor=tk.W, pady=(8, 2))
         mode_frame = ttk.Frame(left_panel)
         mode_frame.pack(fill=tk.X, pady=2)
         self._load_modes()
         self.mode_var = tk.StringVar(value=self.mode_options[0] if self.mode_options else "")
         self.mode_cb = ttk.Combobox(mode_frame, textvariable=self.mode_var, values=self.mode_options)
         self.mode_cb.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(mode_frame, text="添加模式", command=self.add_mode).pack(side=tk.LEFT, padx=5)
+        self.add_mode_btn = ttk.Button(mode_frame, text=t("add_mode"), command=self.add_mode)
+        self.add_mode_btn.pack(side=tk.LEFT, padx=5)
 
         # Column selection (optional)
-        ttk.Label(left_panel, text="列名选择(可选):").pack(anchor=tk.W, pady=(8, 2))
+        self.col_selection_label = ttk.Label(left_panel, text=t("column_selection_optional"))
+        self.col_selection_label.pack(anchor=tk.W, pady=(8, 2))
         col_frame = ttk.Frame(left_panel)
         col_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(col_frame, text="标题列:").pack(side=tk.LEFT)
+        self.title_col_label = ttk.Label(col_frame, text=t("title_column"))
+        self.title_col_label.pack(side=tk.LEFT)
         self.title_col_var = tk.StringVar()
         ttk.Entry(col_frame, textvariable=self.title_col_var, width=15).pack(side=tk.LEFT, padx=2)
-        ttk.Label(col_frame, text="摘要列:").pack(side=tk.LEFT, padx=(10, 0))
+        self.abstract_col_label = ttk.Label(col_frame, text=t("abstract_column"))
+        self.abstract_col_label.pack(side=tk.LEFT, padx=(10, 0))
         self.abstract_col_var = tk.StringVar()
         ttk.Entry(col_frame, textvariable=self.abstract_col_var, width=15).pack(side=tk.LEFT, padx=2)
 
         # Options
-        options_frame = ttk.LabelFrame(left_panel, text="处理选项")
-        options_frame.pack(fill=tk.X, pady=(8, 2))
+        self.options_frame = ttk.LabelFrame(left_panel, text=t("processing_options"))
+        self.options_frame.pack(fill=tk.X, pady=(8, 2))
         self.verify_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="启用验证", variable=self.verify_var).pack(anchor=tk.W, padx=5, pady=2)
+        self.verify_check = ttk.Checkbutton(self.options_frame, text=t("enable_verification"), variable=self.verify_var)
+        self.verify_check.pack(anchor=tk.W, padx=5, pady=2)
 
-        workers_frame = ttk.Frame(options_frame)
+        workers_frame = ttk.Frame(self.options_frame)
         workers_frame.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(workers_frame, text="并发数:").pack(side=tk.LEFT)
+        self.workers_label = ttk.Label(workers_frame, text=t("concurrent_workers"))
+        self.workers_label.pack(side=tk.LEFT)
         self.workers_var = tk.IntVar(value=3)
         ttk.Spinbox(workers_frame, from_=1, to=10, textvariable=self.workers_var, width=10).pack(side=tk.LEFT, padx=5)
 
         # Action buttons
         btn_frame = ttk.Frame(left_panel)
         btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="开始筛选", command=self.start_screen).grid(row=0, column=0, padx=2, pady=2)
+        self.start_btn = ttk.Button(btn_frame, text=t("start_screening"), command=self.start_screen)
+        self.start_btn.grid(row=0, column=0, padx=2, pady=2)
         self.stop_event = threading.Event()
-        self.stop_btn = ttk.Button(btn_frame, text="中止任务", command=self.stop_event.set, state=tk.DISABLED)
+        self.stop_btn = ttk.Button(btn_frame, text=t("stop_task"), command=self.stop_event.set, state=tk.DISABLED)
         self.stop_btn.grid(row=0, column=1, padx=2, pady=2)
-        ttk.Button(btn_frame, text="编辑问题", command=self.edit_questions).grid(row=1, column=0, padx=2, pady=2)
-        ttk.Button(btn_frame, text="查看统计", command=self.show_statistics).grid(row=1, column=1, padx=2, pady=2)
+        self.edit_btn = ttk.Button(btn_frame, text=t("edit_questions"), command=self.edit_questions)
+        self.edit_btn.grid(row=1, column=0, padx=2, pady=2)
+        self.stats_btn = ttk.Button(btn_frame, text=t("view_statistics"), command=self.show_statistics)
+        self.stats_btn.grid(row=1, column=1, padx=2, pady=2)
 
         # Progress
         self.progress = tk.DoubleVar()
@@ -100,7 +114,8 @@ class AbstractTab:
         ttk.Label(left_panel, textvariable=self.status, wraplength=300).pack(pady=2)
 
         # Log
-        ttk.Label(left_panel, text="日志:").pack(anchor=tk.W, pady=(5, 2))
+        self.log_label = ttk.Label(left_panel, text=t("log_label"))
+        self.log_label.pack(anchor=tk.W, pady=(5, 2))
         log_frame = ttk.Frame(left_panel)
         log_frame.pack(fill=tk.BOTH, expand=True)
         self.log_text = tk.Text(log_frame, height=8, state=tk.DISABLED, wrap=tk.WORD)
@@ -112,17 +127,17 @@ class AbstractTab:
         # Export buttons
         export_frame = ttk.Frame(left_panel)
         export_frame.pack(pady=5)
-        self.export_csv_btn = ttk.Button(export_frame, text="导出 CSV", command=self.export_csv, state=tk.DISABLED)
+        self.export_csv_btn = ttk.Button(export_frame, text=t("export_csv"), command=self.export_csv, state=tk.DISABLED)
         self.export_csv_btn.pack(side=tk.LEFT, padx=2)
-        self.export_excel_btn = ttk.Button(export_frame, text="导出 Excel", command=self.export_excel, state=tk.DISABLED)
+        self.export_excel_btn = ttk.Button(export_frame, text=t("export_excel"), command=self.export_excel, state=tk.DISABLED)
         self.export_excel_btn.pack(side=tk.LEFT, padx=2)
 
         # Right panel - Results preview
-        right_panel = ttk.LabelFrame(frame, text="结果预览")
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.right_panel = ttk.LabelFrame(self.frame, text=t("results_preview"))
+        self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Treeview with scrollbars
-        tree_frame = ttk.Frame(right_panel)
+        tree_frame = ttk.Frame(self.right_panel)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Scrollbars
@@ -147,14 +162,17 @@ class AbstractTab:
         tree_frame.grid_columnconfigure(0, weight=1)
 
         # Status label for preview
-        self.preview_status = tk.StringVar(value="暂无数据")
-        ttk.Label(right_panel, textvariable=self.preview_status).pack(pady=2)
+        self.preview_status = tk.StringVar(value=t("no_data"))
+        ttk.Label(self.right_panel, textvariable=self.preview_status).pack(pady=2)
 
         # Data storage
         self.df: Optional[pd.DataFrame] = None
         self.statistics: Optional[dict] = None
         self.title_col: Optional[str] = None
         self.abstract_col: Optional[str] = None
+
+        # Register language observer
+        get_i18n().add_observer(self.update_language)
 
     def _load_modes(self) -> None:
         """Load available screening modes from both unified and legacy configs."""
@@ -185,7 +203,7 @@ class AbstractTab:
         """Start the screening process."""
         path = self.file_var.get()
         if not path:
-            messagebox.showerror("错误", "请先选择文件")
+            messagebox.showerror(t("error"), t("error_select_file"))
             return
         mode = self.mode_var.get()
         self.export_csv_btn.config(state=tk.DISABLED)
@@ -236,8 +254,8 @@ class AbstractTab:
                 self._schedule(lambda: self._show_column_selector_error(str(e), path, config))
                 return
             except (InvalidFileFormatError, IOError) as e:
-                self._schedule(self._log, f"错误: {e}")
-                self._schedule(lambda: messagebox.showerror("错误", str(e)))
+                self._schedule(self._log, f"{t('error')}: {e}")
+                self._schedule(lambda: messagebox.showerror(t("error"), str(e)))
                 return
 
             # Store column names
@@ -249,8 +267,9 @@ class AbstractTab:
             self.df = df
 
             # Log start
-            self._schedule(self._log, f"开始处理 {len(df)} 篇文献...")
-            self._schedule(self._log, f"并发数: {config['MAX_WORKERS']}, 验证: {'是' if config['ENABLE_VERIFICATION'] else '否'}")
+            self._schedule(self._log, t("processing_articles", count=len(df)))
+            verification_text = t("yes") if config['ENABLE_VERIFICATION'] else t("no")
+            self._schedule(self._log, t("concurrent_verification", workers=config['MAX_WORKERS'], verification=verification_text))
 
             # Create screener
             client = AIClient(config)
@@ -261,7 +280,7 @@ class AbstractTab:
 
             def progress_callback(index, total, result):
                 completed_count[0] += 1
-                self._schedule(self.status.set, f"已完成: {completed_count[0]}/{total}")
+                self._schedule(self.status.set, t("completed_status", completed=completed_count[0], total=total))
                 self._schedule(self.progress.set, (completed_count[0] / total) * 100)
 
                 # Update log
@@ -280,7 +299,7 @@ class AbstractTab:
             )
 
             if self.stop_event.is_set():
-                self._schedule(self._log, "任务已中止")
+                self._schedule(self._log, t("task_stopped"))
             else:
                 # Save results
                 base, ext = os.path.splitext(path)
@@ -293,15 +312,15 @@ class AbstractTab:
                 # Generate statistics
                 self.statistics = screener.generate_statistics(df, open_q, yes_no_q)
 
-                self._schedule(self._log, f"完成! 结果已保存到: {output_file_path}")
-                self._schedule(self._log, f"总计: {self.statistics['total_articles']} 篇")
+                self._schedule(self._log, t("complete_saved", path=output_file_path))
+                self._schedule(self._log, t("total_count", count=self.statistics['total_articles']))
                 self._schedule(self.update_results_preview)
 
         except Exception as e:
             import traceback
-            self._schedule(self._log, f"错误: {e}")
+            self._schedule(self._log, f"{t('error')}: {e}")
             self._schedule(self._log, traceback.format_exc())
-            self._schedule(lambda: messagebox.showerror("错误", str(e)))
+            self._schedule(lambda: messagebox.showerror(t("error"), str(e)))
         finally:
             self._schedule(self.status.set, "")
             self._schedule(self.progress.set, 0)
@@ -314,8 +333,8 @@ class AbstractTab:
     def _show_column_selector_error(self, error_msg: str, path: str, config: dict) -> None:
         """Show column selection dialog when auto-detection fails."""
         # Show error message first
-        msg = f"{error_msg}\n\n是否手动选择列?"
-        if not messagebox.askyesno("列识别失败", msg):
+        msg = f"{error_msg}\n\n{t('manual_select_columns')}"
+        if not messagebox.askyesno(t("column_recognition_failed"), msg):
             return
 
         # Load file to get available columns
@@ -325,24 +344,24 @@ class AbstractTab:
             else:
                 df = pd.read_excel(path)
         except Exception as e:
-            messagebox.showerror("错误", f"无法读取文件: {e}")
+            messagebox.showerror(t("error"), t("cannot_read_file", error=e))
             return
 
         columns = list(df.columns)
 
         # Show selection dialog
         dialog = tk.Toplevel(self.app.root)
-        dialog.title("选择列")
+        dialog.title(t("select_column"))
         dialog.geometry("400x200")
         dialog.transient(self.app.root)
         dialog.grab_set()
 
-        ttk.Label(dialog, text="请选择标题列和摘要列:").pack(pady=10)
+        ttk.Label(dialog, text=t("please_select_columns")).pack(pady=10)
 
         # Title column
         title_frame = ttk.Frame(dialog)
         title_frame.pack(fill=tk.X, padx=20, pady=5)
-        ttk.Label(title_frame, text="标题列:").pack(side=tk.LEFT)
+        ttk.Label(title_frame, text=t("title_column")).pack(side=tk.LEFT)
         title_var = tk.StringVar()
         title_combo = ttk.Combobox(title_frame, textvariable=title_var, values=columns)
         title_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
@@ -350,7 +369,7 @@ class AbstractTab:
         # Abstract column
         abstract_frame = ttk.Frame(dialog)
         abstract_frame.pack(fill=tk.X, padx=20, pady=5)
-        ttk.Label(abstract_frame, text="摘要列:").pack(side=tk.LEFT)
+        ttk.Label(abstract_frame, text=t("abstract_column")).pack(side=tk.LEFT)
         abstract_var = tk.StringVar()
         abstract_combo = ttk.Combobox(abstract_frame, textvariable=abstract_var, values=columns)
         abstract_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
@@ -368,8 +387,8 @@ class AbstractTab:
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="确定", command=on_ok).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="取消", command=on_cancel).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text=t("ok"), command=on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text=t("cancel"), command=on_cancel).pack(side=tk.LEFT, padx=5)
 
     def _log_article_result(self, index: int, result: dict, open_q: list, yes_no_q: list, config: dict) -> None:
         """Log the result of a single article analysis."""
@@ -399,12 +418,12 @@ class AbstractTab:
                 mark = "✔" if ver == "是" else "✖" if ver == "否" else "?" if ver else ""
             summary_parts.append(f"{key}:{ans}{(' ' + mark) if mark else ''}")
 
-        self._log(f"条目 {index + 1}: {'; '.join(summary_parts)}")
+        self._log(t("entry_log", index=index + 1, summary='; '.join(summary_parts)))
 
     def update_results_preview(self) -> None:
         """Update the Treeview with current results."""
         if self.df is None or len(self.df) == 0:
-            self.preview_status.set("暂无数据")
+            self.preview_status.set(t("no_data"))
             return
 
         # Clear existing data
@@ -429,17 +448,18 @@ class AbstractTab:
         # Update status
         total_rows = len(self.df)
         displayed_rows = min(100, total_rows)
-        self.preview_status.set(f"显示 {displayed_rows}/{total_rows} 行, {len(display_cols)}/{len(self.df.columns)} 列")
+        self.preview_status.set(t("display_rows_cols", displayed=displayed_rows, total=total_rows,
+                                   display_cols=len(display_cols), total_cols=len(self.df.columns)))
 
     def show_statistics(self) -> None:
         """Show statistics dialog."""
         if self.statistics is None:
-            messagebox.showinfo("提示", "请先完成筛选任务")
+            messagebox.showinfo(t("hint"), t("please_complete_screening"))
             return
 
         # Create statistics window
         win = tk.Toplevel(self.app.root)
-        win.title("筛选统计")
+        win.title(t("screening_statistics"))
         win.geometry("600x500")
         win.transient(self.app.root)
 
@@ -448,7 +468,7 @@ class AbstractTab:
         header.pack(fill=tk.X, padx=10, pady=10)
         ttk.Label(
             header,
-            text=f"筛选统计摘要 - 共 {self.statistics['total_articles']} 篇文献",
+            text=t("statistics_summary", count=self.statistics['total_articles']),
             font=("", 12, "bold")
         ).pack()
 
@@ -458,7 +478,7 @@ class AbstractTab:
 
         # Yes/No Questions Tab
         yn_frame = ttk.Frame(notebook)
-        notebook.add(yn_frame, text="是/否问题统计")
+        notebook.add(yn_frame, text=t("yes_no_questions_stats"))
 
         yn_text = tk.Text(yn_frame, wrap=tk.WORD, state=tk.DISABLED)
         yn_scroll = ttk.Scrollbar(yn_frame, orient=tk.VERTICAL, command=yn_text.yview)
@@ -486,7 +506,7 @@ class AbstractTab:
 
         # Open Questions Tab
         oq_frame = ttk.Frame(notebook)
-        notebook.add(oq_frame, text="开放问题统计")
+        notebook.add(oq_frame, text=t("open_questions_stats"))
 
         oq_text = tk.Text(oq_frame, wrap=tk.WORD, state=tk.DISABLED)
         oq_scroll = ttk.Scrollbar(oq_frame, orient=tk.VERTICAL, command=oq_text.yview)
@@ -497,14 +517,14 @@ class AbstractTab:
         oq_text.config(state=tk.NORMAL)
         for question, stats in self.statistics.get('open_question_stats', {}).items():
             oq_text.insert(tk.END, f"\n{'='*60}\n")
-            oq_text.insert(tk.END, f"问题: {question}\n")
+            oq_text.insert(tk.END, f"{t('question')}: {question}\n")
             oq_text.insert(tk.END, f"{'-'*60}\n")
             oq_text.insert(tk.END, f"  已回答: {stats.get('answered', 0)} 篇\n")
             oq_text.insert(tk.END, f"  未回答: {stats.get('missing', 0)} 篇\n")
         oq_text.config(state=tk.DISABLED)
 
         # Close button
-        ttk.Button(win, text="关闭", command=win.destroy).pack(pady=10)
+        ttk.Button(win, text=t("close"), command=win.destroy).pack(pady=10)
 
     def _log(self, msg: str) -> None:
         self.log_text.config(state=tk.NORMAL)
@@ -535,30 +555,30 @@ class AbstractTab:
 
     def export_csv(self) -> None:
         if self.df is None:
-            messagebox.showerror("错误", "没有可导出的结果")
+            messagebox.showerror(t("error"), t("error_no_results"))
             return
-        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV 文件", "*.csv")])
+        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[(t("csv_files"), "*.csv")])
         if path:
             self.df.to_csv(path, index=False, encoding="utf-8-sig")
-            messagebox.showinfo("成功", "CSV 已导出")
+            messagebox.showinfo(t("success"), t("csv_exported"))
 
     def export_excel(self) -> None:
         if self.df is None:
-            messagebox.showerror("错误", "没有可导出的结果")
+            messagebox.showerror(t("error"), t("error_no_results"))
             return
-        path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel 文件", "*.xlsx")])
+        path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
         if path:
             self.df.to_excel(path, index=False, engine="openpyxl")
-            messagebox.showinfo("成功", "Excel 已导出")
+            messagebox.showinfo(t("success"), t("excel_exported"))
 
     def add_mode(self) -> None:
-        name = simpledialog.askstring("新模式", "请输入模式名称:", parent=self.app.root)
+        name = simpledialog.askstring(t("new_mode"), t("enter_mode_name"), parent=self.app.root)
         if not name:
             return
         if name in self.modes_data:
-            messagebox.showerror("错误", "模式已存在")
+            messagebox.showerror(t("error"), t("mode_exists"))
             return
-        desc = simpledialog.askstring("描述", "请输入模式描述:", parent=self.app.root) or ""
+        desc = simpledialog.askstring(t("description"), t("enter_description"), parent=self.app.root) or ""
         self.modes_data[name] = {"description": desc, "open_questions": [], "yes_no_questions": []}
         with self.q_config_path.open("w", encoding="utf-8") as f:
             json.dump(self.modes_data, f, ensure_ascii=False, indent=2)
@@ -577,7 +597,7 @@ class AbstractTab:
         yes_no_q = mode_data.get("yes_no_questions", [])
 
         win = tk.Toplevel(self.app.root)
-        win.title("编辑问题")
+        win.title(t("edit_questions"))
         win.geometry("640x420")
         win.transient(self.app.root)
         win.grab_set()
@@ -587,7 +607,7 @@ class AbstractTab:
 
         def prompt_question(initial: Optional[dict[str, str]] = None) -> Optional[dict[str, str]]:
             dialog = tk.Toplevel(win)
-            dialog.title("设置问题")
+            dialog.title(t("setup_question"))
             dialog.transient(win)
             dialog.grab_set()
             dialog.resizable(True, True)
@@ -619,13 +639,13 @@ class AbstractTab:
                 column_name = column_var.get().strip()
                 question = question_text.get("1.0", tk.END).strip()
                 if not key:
-                    messagebox.showerror("错误", "Key 不能为空", parent=dialog)
+                    messagebox.showerror(t("error"), t("key_cannot_empty"), parent=dialog)
                     return
                 if not question:
-                    messagebox.showerror("错误", "Question 不能为空", parent=dialog)
+                    messagebox.showerror(t("error"), t("question_cannot_empty"), parent=dialog)
                     return
                 if not column_name:
-                    messagebox.showerror("错误", "Column Name 不能为空", parent=dialog)
+                    messagebox.showerror(t("error"), t("column_name_cannot_empty"), parent=dialog)
                     return
                 result = {"key": key, "question": question, "column_name": column_name}
                 dialog.destroy()
@@ -633,8 +653,8 @@ class AbstractTab:
             def on_cancel() -> None:
                 dialog.destroy()
 
-            ttk.Button(button_frame, text="保存", command=on_save).pack(side=tk.LEFT, padx=5)
-            ttk.Button(button_frame, text="取消", command=on_cancel).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text=t("save"), command=on_save).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text=t("cancel"), command=on_cancel).pack(side=tk.LEFT, padx=5)
 
             dialog.columnconfigure(1, weight=1)
             dialog.rowconfigure(2, weight=1)
@@ -661,7 +681,7 @@ class AbstractTab:
             def edit_item():
                 sel = lb.curselection()
                 if not sel:
-                    messagebox.showwarning("提示", "请先选择一个问题")
+                    messagebox.showwarning(t("hint"), t("please_select_question"))
                     return
                 idx = sel[0]
                 item = items[idx]
@@ -684,14 +704,14 @@ class AbstractTab:
 
             btn_f = ttk.Frame(frame)
             btn_f.pack(pady=5)
-            ttk.Button(btn_f, text="添加", command=add_item).pack(side=tk.LEFT, padx=5)
-            ttk.Button(btn_f, text="编辑", command=edit_item).pack(side=tk.LEFT, padx=5)
-            ttk.Button(btn_f, text="删除", command=del_item).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_f, text=t("add"), command=add_item).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_f, text=t("edit"), command=edit_item).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_f, text=t("delete"), command=del_item).pack(side=tk.LEFT, padx=5)
             lb.bind("<Double-Button-1>", lambda _event: edit_item())
             return frame
 
-        make_section(content, "开放问题", open_q)
-        make_section(content, "是/否问题", yes_no_q)
+        make_section(content, t("open_questions"), open_q)
+        make_section(content, t("yes_no_questions"), yes_no_q)
 
         def close_window() -> None:
             try:
@@ -702,7 +722,7 @@ class AbstractTab:
 
         def save():
             if not mode:
-                messagebox.showerror("错误", "请先选择一个模式后再保存。", parent=win)
+                messagebox.showerror(t("error"), t("please_select_mode"), parent=win)
                 return
 
             updated_mode = dict(mode_data)
@@ -714,17 +734,48 @@ class AbstractTab:
                 with self.q_config_path.open("w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
             except OSError as exc:
-                messagebox.showerror("错误", f"保存问题配置失败: {exc}", parent=win)
+                messagebox.showerror(t("error"), t("save_question_config_failed", error=exc), parent=win)
                 return
 
             self.modes_data = data
             self.mode_cb.configure(values=list(self.modes_data.keys()))
             self.mode_var.set(mode)
-            messagebox.showinfo("成功", "问题配置已保存。", parent=win)
+            messagebox.showinfo(t("success"), t("question_config_saved"), parent=win)
             close_window()
 
         action_frame = ttk.Frame(win)
         action_frame.pack(fill=tk.X, padx=10, pady=10)
-        ttk.Button(action_frame, text="取消", command=close_window).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(action_frame, text="保存", command=save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(action_frame, text=t("cancel"), command=close_window).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(action_frame, text=t("save"), command=save).pack(side=tk.RIGHT, padx=5)
         win.protocol("WM_DELETE_WINDOW", close_window)
+
+    def update_language(self) -> None:
+        """Update all UI text when language changes."""
+        # Update tab title
+        self.app.notebook.tab(self.tab_index, text=t("abstract_tab"))
+
+        # Update labels
+        self.file_label.config(text=t("select_file_label"))
+        self.mode_label.config(text=t("screening_mode_label"))
+        self.col_selection_label.config(text=t("column_selection_optional"))
+        self.title_col_label.config(text=t("title_column"))
+        self.abstract_col_label.config(text=t("abstract_column"))
+        self.options_frame.config(text=t("processing_options"))
+        self.verify_check.config(text=t("enable_verification"))
+        self.workers_label.config(text=t("concurrent_workers"))
+        self.log_label.config(text=t("log_label"))
+        self.right_panel.config(text=t("results_preview"))
+
+        # Update buttons
+        self.browse_btn.config(text=t("browse"))
+        self.add_mode_btn.config(text=t("add_mode"))
+        self.start_btn.config(text=t("start_screening"))
+        self.stop_btn.config(text=t("stop_task"))
+        self.edit_btn.config(text=t("edit_questions"))
+        self.stats_btn.config(text=t("view_statistics"))
+        self.export_csv_btn.config(text=t("export_csv"))
+        self.export_excel_btn.config(text=t("export_excel"))
+
+        # Update preview status if no data
+        if self.df is None or len(self.df) == 0:
+            self.preview_status.set(t("no_data"))
