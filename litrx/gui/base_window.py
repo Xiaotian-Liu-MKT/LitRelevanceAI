@@ -8,7 +8,9 @@ import platform
 # This environment variable disables the strict version check
 # MUST be set before importing tkinter
 if platform.system() == "Darwin":  # macOS
-    os.environ.setdefault("SYSTEM_VERSION_COMPAT", "0")
+    previous_compat = os.environ.get("SYSTEM_VERSION_COMPAT")
+    if previous_compat != "0":
+        os.environ["SYSTEM_VERSION_COMPAT"] = "0"
 
 import tkinter as tk
 from pathlib import Path
