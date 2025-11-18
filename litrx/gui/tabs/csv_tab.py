@@ -118,6 +118,11 @@ class CsvTab:
         threading.Thread(target=self.process_csv, args=(path, topic), daemon=True).start()
 
     def process_csv(self, path: str, topic: str) -> None:
+        """Process CSV file with thread-safe DataFrame updates.
+
+        This method runs in a worker thread. All DataFrame modifications
+        are applied through root.after() to ensure thread safety.
+        """
         config = self.app.build_config()
         analyzer = LiteratureAnalyzer(config, topic)
         try:
@@ -129,18 +134,40 @@ class CsvTab:
         self.df = df
         self.analyzer = analyzer
         total = len(df)
+
+        # Define progress callback for thread-safe updates
+        def progress_callback(idx, total_papers, result):
+            """Called from worker thread - schedules UI updates on main thread."""
+            if result is None:
+                # Paper skipped due to missing data
+                return
+
+            # Apply result to DataFrame in main thread (thread-safe)
+            def apply_update():
+                analyzer.apply_result_to_dataframe(df, idx, result)
+                summary = result['analysis'].replace('\n', ' ')[:80]
+                self.update_row(idx, result['title'], result['relevance_score'], summary)
+
+            self.app.root.after(0, apply_update)
+
+        # Process all papers
         for i, (idx, row) in enumerate(df.iterrows(), start=1):
             try:
                 res = analyzer.analyze_paper(row['Title'], row['Abstract'])
-                df.at[idx, 'Relevance Score'] = res['relevance_score']
-                df.at[idx, 'Analysis Result'] = res['analysis']
-                df.at[idx, 'Literature Review Suggestion'] = res.get('literature_review_suggestion', '')
-                summary = res['analysis'].replace('\n', ' ')[:80]
-                self.app.root.after(0, self.update_row, idx, row['Title'], res['relevance_score'], summary)
+                res['title'] = row['Title']
+                res['index'] = idx
+
+                # Schedule DataFrame update and UI update on main thread
+                progress_callback(idx, total, res)
+
             except Exception as e:  # pragma: no cover - UI feedback
                 error_msg = t("error_analysis", error=str(e))
                 self.app.root.after(0, self.update_row, idx, row['Title'], '', error_msg)
+
+            # Update progress bar
             self.app.root.after(0, lambda v=i / total * 100: self.progress.set(v))
+
+        # Enable export button when done
         self.app.root.after(0, lambda: self.export_btn.config(state=tk.NORMAL))
 
     def update_row(self, idx: int, title: str, score: float | str, analysis: str) -> None:

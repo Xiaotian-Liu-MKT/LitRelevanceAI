@@ -18,6 +18,12 @@ try:
 except Exception:  # pragma: no cover - fallback if pyyaml missing
     yaml = None
 
+try:
+    from .key_manager import get_key_manager, KEY_OPENAI, KEY_SILICONFLOW
+    KEYRING_AVAILABLE = True
+except ImportError:
+    KEYRING_AVAILABLE = False
+
 # Base configuration shared across scripts.
 DEFAULT_CONFIG: Dict[str, Any] = {
     "AI_SERVICE": "openai",  # or "gemini" or "siliconflow"
@@ -46,7 +52,13 @@ def load_env_file(env_path: str = ".env") -> None:
         os.environ.setdefault(key.strip(), value.strip())
 
 def load_config(path: Optional[str], default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Load configuration from a JSON or YAML file and merge with defaults."""
+    """Load configuration from a JSON or YAML file and merge with defaults.
+
+    This function now prioritizes API keys in the following order:
+    1. Environment variables (highest priority)
+    2. Secure keyring storage
+    3. Config file values (lowest priority, for backward compatibility)
+    """
 
     config: Dict[str, Any] = (default or DEFAULT_CONFIG).copy()
     if not path:
@@ -68,5 +80,19 @@ def load_config(path: Optional[str], default: Optional[Dict[str, Any]] = None) -
             config.update(user_cfg)
     except Exception as e:
         raise RuntimeError(f"Failed to load config file {path}: {e}")
+
+    # Load API keys from secure keyring (if available)
+    if KEYRING_AVAILABLE:
+        key_manager = get_key_manager()
+
+        # Load OpenAI key from keyring if not in config
+        openai_key = key_manager.get_key(KEY_OPENAI)
+        if openai_key and not config.get("OPENAI_API_KEY"):
+            config["OPENAI_API_KEY"] = openai_key
+
+        # Load SiliconFlow key from keyring if not in config
+        siliconflow_key = key_manager.get_key(KEY_SILICONFLOW)
+        if siliconflow_key and not config.get("SILICONFLOW_API_KEY"):
+            config["SILICONFLOW_API_KEY"] = siliconflow_key
 
     return config
