@@ -16,9 +16,12 @@ from .config import (
 )
 from .ai_client import AIClient
 from .progress_manager import ProgressManager, create_progress_manager
+from .cache import get_cache
+from .logging_config import get_logger
 
 
 load_env_file()
+logger = get_logger(__name__)
 
 DEFAULT_CONFIG = {
     **BASE_CONFIG,
@@ -46,6 +49,10 @@ class LiteratureAnalyzer:
         self.questions = questions or {}
         self.client = AIClient(config)
         self.prompt_template = self._load_prompt_template()
+        self.cache = get_cache() if config.get("ENABLE_CACHE", True) else None
+        self.cache_hits = 0
+        self.cache_misses = 0
+        logger.info(f"LiteratureAnalyzer initialized, caching={'enabled' if self.cache else 'disabled'}")
 
     def _load_prompt_template(self) -> str:
         """Load prompt template from prompts_config.json."""
@@ -111,6 +118,16 @@ Please return in the following JSON format:
 
     def analyze_paper(self, title: str, abstract: str) -> Dict:
         """Analyze the relevance of a single paper to the research topic"""
+        # Try to get from cache first
+        if self.cache:
+            cache_key = self.research_topic  # Use research topic as part of cache key
+            cached_result = self.cache.get(title, abstract, cache_key)
+            if cached_result is not None:
+                self.cache_hits += 1
+                logger.debug(f"Cache hit for '{title[:50]}...'")
+                return cached_result
+            self.cache_misses += 1
+
         prompt = self.prompt_template.format(
             research_topic=self.research_topic,
             title=title,
@@ -130,7 +147,7 @@ Please return in the following JSON format:
                 response_text = response_text[:-3]
             response_text = response_text.strip()
             try:
-                return json.loads(response_text)
+                result = json.loads(response_text)
             except json.JSONDecodeError:
                 import re
                 relevance_score_match = re.search(r'"relevance_score"\s*:\s*(\d+)', response_text)
@@ -139,11 +156,18 @@ Please return in the following JSON format:
                 analysis = analysis_match.group(1) if analysis_match else "Unable to extract analysis result from response"
                 lit_review_match = re.search(r'"literature_review_suggestion"\s*:\s*"([^"]*)"', response_text)
                 lit_review = lit_review_match.group(1) if lit_review_match else ""
-                return {
+                result = {
                     "relevance_score": relevance_score,
                     "analysis": analysis,
                     "literature_review_suggestion": lit_review,
                 }
+
+            # Cache the result
+            if self.cache:
+                cache_key = self.research_topic
+                self.cache.set(title, abstract, result, cache_key)
+
+            return result
         except Exception as e:
             raise Exception(f"Failed to analyze paper: {str(e)}")
     def batch_analyze(self, df: pd.DataFrame, original_file_path: str, progress_callback=None, use_checkpoint=True) -> List[Dict]:
@@ -246,6 +270,13 @@ Please return in the following JSON format:
                     print(f"\nAnalysis complete! Results saved to: {progress_mgr.output_path}")
                 else:
                     self.save_results(df, original_file_path)
+
+            # Log cache statistics
+            if self.cache:
+                total_requests = self.cache_hits + self.cache_misses
+                hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
+                logger.info(f"Cache statistics: {self.cache_hits} hits, {self.cache_misses} misses ({hit_rate:.1f}% hit rate)")
+                print(f"\nCache performance: {self.cache_hits} hits, {self.cache_misses} misses ({hit_rate:.1f}% hit rate)")
 
         return results
 
