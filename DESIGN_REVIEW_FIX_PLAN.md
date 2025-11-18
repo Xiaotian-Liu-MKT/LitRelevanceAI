@@ -20,9 +20,9 @@
 **Phase 1 完成度**: 4/4 (100%)
 
 #### Phase 2 (P1) - 重要重构
-- [x] **P1-3**: 提取魔法数字到 constants.py (commit: 待提交)
-- [x] **P1-2**: 创建 ConfigFactory 统一配置 (commit: 待提交)
-- [x] **P1-4**: 重构超长函数 (PromptBuilder) (commit: 待提交)
+- [x] **P1-3**: 提取魔法数字到 constants.py (commit: 63aa6ab)
+- [x] **P1-2**: 创建 ConfigFactory 统一配置 (commit: bd12d72)
+- [x] **P1-4**: 重构超长函数 (PromptBuilder) (commit: 1fde0fd)
 
 **Phase 2 完成度**: 3/4 (75%)
 
