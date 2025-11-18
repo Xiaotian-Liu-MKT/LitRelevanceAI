@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
 import time
-import subprocess
+from typing import TYPE_CHECKING, Dict, List
+
+from ...tk_compat import ensure_native_macos_version
+
+ensure_native_macos_version()
+
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import TYPE_CHECKING, Dict, List
 
 import pandas as pd
 

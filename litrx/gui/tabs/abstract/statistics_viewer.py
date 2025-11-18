@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import ttk, messagebox
 from typing import TYPE_CHECKING, Optional
+
+from ....tk_compat import ensure_native_macos_version
+
+ensure_native_macos_version()
+
+import tkinter as tk
+from tkinter import messagebox, ttk
 
 from ....i18n import t
 

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import copy
+from typing import Any, Dict, List, Optional
+
+from ...tk_compat import ensure_native_macos_version
+
+ensure_native_macos_version()
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import Any, Dict, List, Optional
-import copy
 
 
 class DimensionEditorDialog:

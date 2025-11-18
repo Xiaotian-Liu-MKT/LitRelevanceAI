@@ -7,9 +7,12 @@ The script checks for required packages and installs them if missing.
 """
 
 import importlib
-import os
 import subprocess
 import sys
+
+from litrx.tk_compat import ensure_native_macos_version
+
+ensure_native_macos_version()
 import platform
 
 # Fix for macOS Tk version check issue
