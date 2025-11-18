@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
+from filelock import FileLock
+
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class ProgressManager:
@@ -42,59 +47,73 @@ class ProgressManager:
     ) -> None:
         """Save progress checkpoint atomically.
 
-        Uses atomic file replacement to prevent corruption during save.
+        Uses atomic file replacement with file locking to prevent corruption
+        and race conditions in multi-process scenarios.
 
         Args:
             df: DataFrame with current results
             last_index: Index of last processed row
             metadata: Additional metadata to save (e.g., configuration, timestamp)
         """
-        # Prepare metadata
-        checkpoint_data = {
-            "last_index": last_index,
-            "timestamp": datetime.now().isoformat(),
-            "total_rows": len(df),
-            **(metadata or {})
-        }
+        # Create lock file path
+        lock_file = self.checkpoint_csv.with_suffix('.lock')
 
-        # Create temporary files
-        temp_csv = self.checkpoint_csv.with_suffix(".tmp.csv")
-        temp_json = self.checkpoint_json.with_suffix(".tmp.json")
+        # Use file lock to ensure atomic operation
+        with FileLock(str(lock_file), timeout=30):
+            # Prepare metadata
+            checkpoint_data = {
+                "last_index": last_index,
+                "timestamp": datetime.now().isoformat(),
+                "total_rows": len(df),
+                **(metadata or {})
+            }
 
-        try:
-            # Save DataFrame to temporary CSV
-            if self.output_path.suffix.lower() == '.csv':
-                df.to_csv(temp_csv, index=False, encoding='utf-8-sig')
-            else:  # Excel
-                df.to_excel(temp_csv.with_suffix('.xlsx'), index=False, engine='openpyxl')
-                temp_csv = temp_csv.with_suffix('.xlsx')
+            # Create temporary files
+            temp_csv = self.checkpoint_csv.with_suffix(".tmp.csv")
+            temp_json = self.checkpoint_json.with_suffix(".tmp.json")
 
-            # Save metadata to temporary JSON
-            with temp_json.open('w', encoding='utf-8') as f:
-                json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
+            try:
+                # Save DataFrame to temporary CSV
+                if self.output_path.suffix.lower() == '.csv':
+                    df.to_csv(temp_csv, index=False, encoding='utf-8-sig')
+                else:  # Excel
+                    df.to_excel(temp_csv.with_suffix('.xlsx'), index=False, engine='openpyxl')
+                    temp_csv = temp_csv.with_suffix('.xlsx')
 
-            # Atomic rename (overwrites existing checkpoint)
-            if os.name == 'nt':  # Windows
-                # Windows requires removing destination first
-                if self.checkpoint_csv.exists():
-                    self.checkpoint_csv.unlink()
-                if self.checkpoint_json.exists():
-                    self.checkpoint_json.unlink()
+                # Save metadata to temporary JSON
+                with temp_json.open('w', encoding='utf-8') as f:
+                    json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
 
-            # Use shutil.move for cross-platform atomic operations
-            shutil.move(str(temp_csv), str(self.checkpoint_csv))
-            shutil.move(str(temp_json), str(self.checkpoint_json))
+                # Atomic rename (overwrites existing checkpoint)
+                # File lock ensures no other process interferes
+                if os.name == 'nt':  # Windows
+                    # Windows requires removing destination first
+                    if self.checkpoint_csv.exists():
+                        self.checkpoint_csv.unlink()
+                    if self.checkpoint_json.exists():
+                        self.checkpoint_json.unlink()
 
-        except Exception as e:
-            # Clean up temporary files on error
-            if temp_csv.exists():
-                temp_csv.unlink()
-            if temp_json.exists():
-                temp_json.unlink()
-            raise RuntimeError(f"Failed to save checkpoint: {e}") from e
+                # Use shutil.move for cross-platform atomic operations
+                shutil.move(str(temp_csv), str(self.checkpoint_csv))
+                shutil.move(str(temp_json), str(self.checkpoint_json))
+
+                logger.debug(f"Checkpoint saved successfully: {self.checkpoint_csv.name}")
+
+            except Exception as e:
+                # Clean up temporary files on error
+                for temp_file in [temp_csv, temp_json]:
+                    if temp_file.exists():
+                        try:
+                            temp_file.unlink()
+                        except Exception as cleanup_error:
+                            logger.warning(f"Failed to cleanup temp file {temp_file}: {cleanup_error}")
+
+                raise RuntimeError(f"Failed to save checkpoint: {e}") from e
 
     def load_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Load checkpoint metadata if it exists.
+
+        Uses file locking to ensure data consistency during read.
 
         Returns:
             Dictionary with checkpoint metadata, or None if no checkpoint exists
@@ -102,15 +121,21 @@ class ProgressManager:
         if not self.checkpoint_json.exists():
             return None
 
+        lock_file = self.checkpoint_csv.with_suffix('.lock')
+
         try:
-            with self.checkpoint_json.open('r', encoding='utf-8') as f:
-                return json.load(f)
+            # Use file lock to prevent reading partial writes
+            with FileLock(str(lock_file), timeout=10):
+                with self.checkpoint_json.open('r', encoding='utf-8') as f:
+                    return json.load(f)
         except Exception as e:
-            print(f"Warning: Failed to load checkpoint metadata: {e}")
+            logger.warning(f"Failed to load checkpoint metadata: {e}")
             return None
 
     def load_dataframe(self) -> Optional[pd.DataFrame]:
         """Load checkpoint DataFrame if it exists.
+
+        Uses file locking to ensure data consistency during read.
 
         Returns:
             DataFrame with checkpointed data, or None if no checkpoint exists
@@ -118,13 +143,17 @@ class ProgressManager:
         if not self.checkpoint_csv.exists():
             return None
 
+        lock_file = self.checkpoint_csv.with_suffix('.lock')
+
         try:
-            if self.checkpoint_csv.suffix.lower() == '.csv':
-                return pd.read_csv(self.checkpoint_csv, encoding='utf-8-sig')
-            else:  # Excel
-                return pd.read_excel(self.checkpoint_csv, engine='openpyxl')
+            # Use file lock to prevent reading partial writes
+            with FileLock(str(lock_file), timeout=10):
+                if self.checkpoint_csv.suffix.lower() == '.csv':
+                    return pd.read_csv(self.checkpoint_csv, encoding='utf-8-sig')
+                else:  # Excel
+                    return pd.read_excel(self.checkpoint_csv, engine='openpyxl')
         except Exception as e:
-            print(f"Warning: Failed to load checkpoint DataFrame: {e}")
+            logger.warning(f"Failed to load checkpoint DataFrame: {e}")
             return None
 
     def has_checkpoint(self) -> bool:
