@@ -1,5 +1,15 @@
 import json
 import os
+import platform
+
+# Fix for macOS Tk version check issue
+# On newer macOS versions (e.g., Sequoia), Tk's version check can fail with errors like:
+# "macOS 26 (2600) or later required, have instead 16 (1600)"
+# This environment variable disables the strict version check
+# MUST be set before importing tkinter
+if platform.system() == "Darwin":  # macOS
+    os.environ.setdefault("SYSTEM_VERSION_COMPAT", "0")
+
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
