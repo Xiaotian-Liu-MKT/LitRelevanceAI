@@ -9,6 +9,9 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 from .config import DEFAULT_CONFIG as BASE_CONFIG, load_config as base_load_config
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
@@ -32,20 +35,27 @@ class AIClient:
         service = config.get("AI_SERVICE", "openai")
         model = config.get("MODEL_NAME", "gpt-4o")
 
+        logger.info(f"Initializing AIClient with service={service}, model={model}")
+
         if service == "openai":
             api_key = config.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
             if not api_key:
+                logger.error("OpenAI API key not configured")
                 raise RuntimeError("OpenAI API密钥未配置。")
             api_base = config.get("API_BASE") or os.getenv("API_BASE") or None
+            logger.debug(f"OpenAI API base: {api_base if api_base else 'default'}")
 
         elif service == "siliconflow":
             api_key = config.get("SILICONFLOW_API_KEY") or os.getenv("SILICONFLOW_API_KEY")
             if not api_key:
+                logger.error("SiliconFlow API key not configured")
                 raise RuntimeError("SiliconFlow API密钥未配置。")
             # SiliconFlow uses OpenAI-compatible API
             api_base = "https://api.siliconflow.cn/v1"
+            logger.debug(f"SiliconFlow API base: {api_base}")
 
         else:
+            logger.error(f"Invalid AI service: {service}")
             raise RuntimeError(
                 f"无效的AI服务 '{service}'。必须是 'openai' 或 'siliconflow'。"
             )
@@ -59,6 +69,7 @@ class AIClient:
             api_key=api_key,
             base_url=api_base if api_base else None
         )
+        logger.info("AIClient initialized successfully")
 
     def request(self, messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
         """Send a chat completion request and return the response.
@@ -76,6 +87,8 @@ class AIClient:
             Response dictionary in OpenAI format with 'choices' key.
         """
         try:
+            logger.debug(f"Sending API request with {len(messages)} messages, kwargs={kwargs}")
+
             # Make the API call
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -83,8 +96,11 @@ class AIClient:
                 **kwargs
             )
 
+            logger.debug(f"API request successful, usage: {response.usage}")
+
             # Convert response to dict format
             return response.model_dump()
 
         except Exception as e:
+            logger.error(f"AI request failed: {e}", exc_info=True)
             raise RuntimeError(f"AI 请求失败: {e}") from e

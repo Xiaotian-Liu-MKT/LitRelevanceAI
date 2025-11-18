@@ -22,9 +22,11 @@ from .config import (
     load_config as base_load_config,
 )
 from .ai_client import AIClient
+from .logging_config import get_logger
 
 
 load_env_file()
+logger = get_logger(__name__)
 
 
 # Custom exceptions for better error handling
@@ -510,9 +512,11 @@ class AbstractScreener:
             config: Configuration dictionary
             client: Optional pre-initialized AIClient
         """
+        logger.info("Initializing AbstractScreener")
         self.config = config
         self.client = client or AIClient(config)
         self.prompts = load_prompts()
+        logger.debug(f"AbstractScreener initialized with max_workers={config.get('MAX_WORKERS', 3)}, verification={config.get('ENABLE_VERIFICATION', True)}")
 
     def analyze_single_article(
         self,
@@ -687,6 +691,9 @@ class AbstractScreener:
         """
         max_workers = self.config.get('MAX_WORKERS', 3)
         total = len(df)
+
+        logger.info(f"Starting concurrent analysis of {total} articles with {max_workers} workers")
+        logger.debug(f"Open questions: {len(open_questions)}, Yes/No questions: {len(yes_no_questions)}")
 
         def process_article(index_row_tuple):
             """Process a single article (for thread pool) - thread-safe."""
