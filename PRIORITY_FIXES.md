@@ -13,18 +13,19 @@
 | P0-1  | API密钥安全漏洞 | ✅ 已完成 | 2025-11-18 |
 | P0-2  | 线程安全问题 | ✅ 已完成 | 2025-11-18 |
 | P0-3  | 进度保存不可靠 | ✅ 已完成 | 2025-11-18 |
-| P1-4  | i18n硬编码问题 | 🟡 部分完成 | 2025-11-18 |
+| P1-4  | i18n硬编码问题 | ✅ 已完成 | 2025-11-18 |
 | P1-5  | 异常处理不当 | ✅ 已完成 | 2025-11-18 |
 | P1-6  | 无法取消长时间操作 | ✅ 已完成 | 2025-11-18 |
-| P2-7  | 配置管理混乱 | ⏸️ 待处理 | - |
-| P2-8  | 重复代码过多 | ⏸️ 待处理 | - |
-| P2-9  | 性能问题 | ⏸️ 待处理 | - |
-| P2-10 | 错误日志缺失 | ⏸️ 待处理 | - |
+| P2-7  | 配置管理混乱 | ✅ 已完成 | 2025-11-18 |
+| P2-8  | 重复代码过多 | ✅ 已完成 | 2025-11-18 |
+| P2-9  | 性能问题 | ✅ 已完成 | 2025-11-18 |
+| P2-10 | 错误日志缺失 | ✅ 已完成 | 2025-11-18 |
 
 **完成度**:
 - P0级别: 3/3 (100%) ✅
 - P1级别: 3/3 (100%) ✅
-- 总体: 6/10 (60%)
+- P2级别: 4/4 (100%) ✅
+- 总体: 10/10 (100%) 🎉
 
 ### 已实现的改进
 
@@ -48,10 +49,13 @@
 - 每 5 篇文献自动保存检查点
 - 完成后自动清理检查点文件
 
-**🟡 P1-4: i18n国际化** (commit a40639c)
-- 在 `litrx/i18n.py` 添加 50+ 个翻译键
+**✅ P1-4: i18n国际化** (commit a48d2a1)
+- 在 `litrx/i18n.py` 添加 60+ 个翻译键
 - 完成中英文双语翻译
-- 待完成: abstract_tab.py 中 60+ 处硬编码字符串替换
+- 修改 `litrx/gui/tabs/abstract_tab.py` - 替换所有 60+ 处硬编码字符串
+- 实现 `update_language()` 方法支持动态语言切换
+- 注册i18n观察者实现实时UI更新
+- Abstract Screening 标签页完全支持双语切换
 
 **✅ P1-5: 异常处理** (commit a40639c)
 - 新增 `litrx/exceptions.py` - 自定义异常类型
@@ -60,12 +64,86 @@
 - `FileFormatError`, `ColumnNotFoundError` 等
 - 提供清晰、可操作的错误消息
 
-**✅ P1-6: 任务取消** (即将提交)
+**✅ P1-6: 任务取消** (commit 7c6a3dd)
 - 新增 `litrx/task_manager.py` - 统一的任务管理系统
 - `CancellableTask` 类实现可靠的取消机制
 - 修改 `litrx/gui/tabs/csv_tab.py` - 添加停止按钮
 - 支持随时中止长时间运行的分析任务
 - 线程安全的取消检查和状态恢复
+
+**✅ P2-9: 性能优化** (即将提交)
+- 新增 `litrx/cache.py` - 智能结果缓存系统
+- SHA256哈希算法生成缓存键,避免重复AI请求
+- 自动过期机制(默认30天TTL)
+- 缓存分层存储,避免单目录文件过多
+- 在 `litrx/csv_analyzer.py` 集成缓存:
+  - LiteratureAnalyzer支持缓存开关(默认启用)
+  - 自动记录缓存命中/未命中统计
+  - 显示缓存性能指标(命中率)
+- 支持缓存清理、统计查看等管理功能
+- 显著减少重复分析的API调用成本
+
+**✅ P2-7: 配置管理优化** (即将提交)
+- 完全重写 `litrx/config.py` 使用Pydantic进行类型验证
+- 新增 `AIConfig` Pydantic模型:
+  - 严格的类型检查(Literal, float范围等)
+  - 自动API密钥格式验证
+  - 服务与密钥匹配验证
+  - 提供详细的错误信息和修复建议
+- 新增 `ConfigLoader` 类:
+  - 统一的配置加载逻辑
+  - 清晰的优先级顺序文档
+  - 支持5个配置源的级联合并
+- 保持向后兼容:
+  - 现有代码无需修改
+  - `load_config()` 函数签名不变
+  - `DEFAULT_CONFIG` 字典仍然可用
+  - 默认跳过验证避免破坏现有工作流
+- 新增 `get_validated_config()` 用于新代码的严格验证
+- 添加 pydantic>=2.0 依赖到 pyproject.toml
+- 配置错误时提供清晰的诊断信息
+
+**✅ P2-8: 重复代码消除** (commit 603852c)
+- 新增 `litrx/utils.py` - 统一工具模块
+  - `AIResponseParser` - 统一AI响应解析器
+    - 自动清理Markdown代码块(```json)
+    - JSON解析失败时自动使用正则表达式提取
+    - 针对不同模块的专用解析方法
+  - `AsyncTaskRunner` - 统一异步任务执行器
+    - 标准化的后台线程管理
+    - 线程安全的回调机制
+    - 支持任务取消
+  - `ColumnDetector` - 统一列名检测器
+    - 支持多语言列名(中英文)
+    - 灵活的列名匹配
+- 重构所有分析器使用统一解析器:
+  - `litrx/csv_analyzer.py` - 使用 AIResponseParser 和 ColumnDetector
+  - `litrx/abstract_screener.py` - 使用 AIResponseParser
+  - `litrx/matrix_analyzer.py` - 使用 AIResponseParser
+  - `litrx/pdf_screener.py` - 使用 AIResponseParser
+- 消除了4处重复的JSON解析逻辑
+- 提高代码可维护性,bug修复只需改一处
+
+**✅ P2-9: 性能优化** (commit 423f399)
+- 新增 `litrx/cache.py` - 智能结果缓存系统
+- SHA256哈希算法生成缓存键,避免重复AI请求
+- 自动过期机制(默认30天TTL)
+- 缓存分层存储,避免单目录文件过多
+- 在 `litrx/csv_analyzer.py` 集成缓存:
+  - LiteratureAnalyzer支持缓存开关(默认启用)
+  - 自动记录缓存命中/未命中统计
+  - 显示缓存性能指标(命中率)
+- 支持缓存清理、统计查看等管理功能
+- 显著减少重复分析的API调用成本
+
+**✅ P2-10: 错误日志系统** (commit b16880a + 817262c)
+- 新增 `litrx/logging_config.py` - 集中式日志配置模块
+- RotatingFileHandler 实现日志轮转(10MB, 5个备份文件)
+- 日志保存到 `~/.litrx/logs/litrx.log`
+- 在 `litrx/ai_client.py` 添加API调用日志
+- 在 `litrx/abstract_screener.py` 添加分析流程日志
+- 在GUI添加"查看日志"按钮,支持实时查看和刷新
+- 支持打开日志文件夹
 
 ---
 

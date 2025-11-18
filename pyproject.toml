@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml",
     "pypdf",
     "keyring",
+    "pydantic>=2.0",
 ]
 
 [project.scripts]

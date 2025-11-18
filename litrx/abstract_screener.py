@@ -22,9 +22,12 @@ from .config import (
     load_config as base_load_config,
 )
 from .ai_client import AIClient
+from .logging_config import get_logger
+from .utils import AIResponseParser
 
 
 load_env_file()
+logger = get_logger(__name__)
 
 
 # Custom exceptions for better error handling
@@ -353,10 +356,11 @@ def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
 
     try:
         if not ai_json_string or not isinstance(ai_json_string, str):
-            print("错误：AI响应为空或格式不正确。")
+            logger.warning("AI响应为空或格式不正确")
             return final_structure
 
-        data = json.loads(ai_json_string)
+        # Use unified parser with fallback (though json_object format should prevent this)
+        data = AIResponseParser.parse_json_with_fallback(ai_json_string)
 
         if "verification_results" in data:
             data = data.get("verification_results", {})
@@ -370,10 +374,10 @@ def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
 
         return final_structure
 
-    except json.JSONDecodeError as e:
-        print(f"JSON解析错误: {e}。AI原始响应: '{ai_json_string[:500]}...'")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"JSON解析错误: {e}。AI原始响应: '{ai_json_string[:500]}...'")
     except Exception as e:
-        print(f"解析AI响应时发生未知错误: {e}")
+        logger.error(f"解析AI响应时发生未知错误: {e}", exc_info=True)
 
     return final_structure
 
@@ -510,9 +514,11 @@ class AbstractScreener:
             config: Configuration dictionary
             client: Optional pre-initialized AIClient
         """
+        logger.info("Initializing AbstractScreener")
         self.config = config
         self.client = client or AIClient(config)
         self.prompts = load_prompts()
+        logger.debug(f"AbstractScreener initialized with max_workers={config.get('MAX_WORKERS', 3)}, verification={config.get('ENABLE_VERIFICATION', True)}")
 
     def analyze_single_article(
         self,
@@ -687,6 +693,9 @@ class AbstractScreener:
         """
         max_workers = self.config.get('MAX_WORKERS', 3)
         total = len(df)
+
+        logger.info(f"Starting concurrent analysis of {total} articles with {max_workers} workers")
+        logger.debug(f"Open questions: {len(open_questions)}, Yes/No questions: {len(yes_no_questions)}")
 
         def process_article(index_row_tuple):
             """Process a single article (for thread pool) - thread-safe."""

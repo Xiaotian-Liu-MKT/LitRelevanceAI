@@ -22,6 +22,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "language": "语言:",
         "save_config": "💾 保存配置",
         "prompt_settings": "⚙️ Prompt设置",
+        "view_logs": "📋 查看日志",
 
         # Tab names
         "csv_tab": "CSV相关性分析",
@@ -154,6 +155,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "cannot_read_file": "无法读取文件: {error}",
         "yes": "是",
         "no": "否",
+        "manual_select_columns": "是否手动选择列?",
+        "ok": "确定",
+        "display_rows_cols": "显示 {displayed}/{total} 行, {display_cols}/{total_cols} 列",
+        "entry_log": "条目 {index}: {summary}",
 
         # PDF Tab specific
         "select_pdf_folder": "选择PDF文件夹:",
@@ -185,6 +190,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "language": "Language:",
         "save_config": "💾 Save Config",
         "prompt_settings": "⚙️ Prompt Settings",
+        "view_logs": "📋 View Logs",
 
         # Tab names
         "csv_tab": "CSV Relevance Analysis",
@@ -281,6 +287,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "cannot_read_file": "Cannot read file: {error}",
         "yes": "Yes",
         "no": "No",
+        "manual_select_columns": "Manually select columns?",
+        "ok": "OK",
+        "display_rows_cols": "Displaying {displayed}/{total} rows, {display_cols}/{total_cols} columns",
+        "entry_log": "Entry {index}: {summary}",
 
         # PDF Tab
         "pdf_input_folder": "PDF Folder:",
