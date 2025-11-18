@@ -821,6 +821,10 @@ def main():
 def run_gui():
     """创建增强的GUI界面"""
     import threading
+    from .tk_compat import ensure_native_macos_version
+
+    ensure_native_macos_version()
+
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 

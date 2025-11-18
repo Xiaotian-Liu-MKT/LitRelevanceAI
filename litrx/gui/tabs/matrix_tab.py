@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import os
-import sys
 import subprocess
+import sys
 import threading
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import yaml
 import pandas as pd
+import yaml
+
+from ...tk_compat import ensure_native_macos_version
+
+ensure_native_macos_version()
+
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
 
 from ...matrix_analyzer import (
     load_matrix_config,

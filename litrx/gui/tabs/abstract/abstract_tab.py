@@ -6,9 +6,14 @@ import json
 import os
 import threading
 from pathlib import Path
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, simpledialog
 from typing import TYPE_CHECKING, Callable, Optional
+
+from ....tk_compat import ensure_native_macos_version
+
+ensure_native_macos_version()
+
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import pandas as pd
 

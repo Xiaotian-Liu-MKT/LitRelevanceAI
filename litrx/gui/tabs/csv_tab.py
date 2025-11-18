@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import threading
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from tkinter.scrolledtext import ScrolledText
 from typing import TYPE_CHECKING, Optional
+
+from ...tk_compat import ensure_native_macos_version
+
+ensure_native_macos_version()
+
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from tkinter.scrolledtext import ScrolledText
 
 import pandas as pd
 
