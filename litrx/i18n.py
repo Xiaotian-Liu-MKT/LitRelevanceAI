@@ -22,6 +22,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "language": "语言:",
         "save_config": "💾 保存配置",
         "prompt_settings": "⚙️ Prompt设置",
+        "view_logs": "📋 查看日志",
 
         # Tab names
         "csv_tab": "CSV相关性分析",
@@ -189,6 +190,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "language": "Language:",
         "save_config": "💾 Save Config",
         "prompt_settings": "⚙️ Prompt Settings",
+        "view_logs": "📋 View Logs",
 
         # Tab names
         "csv_tab": "CSV Relevance Analysis",

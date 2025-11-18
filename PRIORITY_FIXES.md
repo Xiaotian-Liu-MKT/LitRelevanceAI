@@ -19,12 +19,13 @@
 | P2-7  | 配置管理混乱 | ⏸️ 待处理 | - |
 | P2-8  | 重复代码过多 | ⏸️ 待处理 | - |
 | P2-9  | 性能问题 | ⏸️ 待处理 | - |
-| P2-10 | 错误日志缺失 | ⏸️ 待处理 | - |
+| P2-10 | 错误日志缺失 | ✅ 已完成 | 2025-11-18 |
 
 **完成度**:
 - P0级别: 3/3 (100%) ✅
 - P1级别: 3/3 (100%) ✅
-- 总体: 6/10 (60%)
+- P2级别: 1/4 (25%)
+- 总体: 7/10 (70%)
 
 ### 已实现的改进
 
@@ -63,12 +64,21 @@
 - `FileFormatError`, `ColumnNotFoundError` 等
 - 提供清晰、可操作的错误消息
 
-**✅ P1-6: 任务取消** (即将提交)
+**✅ P1-6: 任务取消** (commit 7c6a3dd)
 - 新增 `litrx/task_manager.py` - 统一的任务管理系统
 - `CancellableTask` 类实现可靠的取消机制
 - 修改 `litrx/gui/tabs/csv_tab.py` - 添加停止按钮
 - 支持随时中止长时间运行的分析任务
 - 线程安全的取消检查和状态恢复
+
+**✅ P2-10: 错误日志系统** (commit b16880a + GUI changes)
+- 新增 `litrx/logging_config.py` - 集中式日志配置模块
+- RotatingFileHandler 实现日志轮转(10MB, 5个备份文件)
+- 日志保存到 `~/.litrx/logs/litrx.log`
+- 在 `litrx/ai_client.py` 添加API调用日志
+- 在 `litrx/abstract_screener.py` 添加分析流程日志
+- 在GUI添加"查看日志"按钮,支持实时查看和刷新
+- 支持打开日志文件夹
 
 ---
 

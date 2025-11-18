@@ -159,6 +159,8 @@ class BaseWindow:
         self.save_button.pack(side=tk.LEFT, padx=5)
         self.prompt_button = ttk.Button(self.row2, text=t("prompt_settings"), command=self.open_prompt_settings, style="Secondary.TButton")
         self.prompt_button.pack(side=tk.LEFT, padx=5)
+        self.view_logs_button = ttk.Button(self.row2, text=t("view_logs"), command=self.open_log_viewer, style="Secondary.TButton")
+        self.view_logs_button.pack(side=tk.LEFT, padx=5)
 
         self.notebook = ttk.Notebook(self.root, style="Main.TNotebook")
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
@@ -388,6 +390,7 @@ class BaseWindow:
         self.language_label.config(text=t("language"))
         self.save_button.config(text=t("save_config"))
         self.prompt_button.config(text=t("prompt_settings"))
+        self.view_logs_button.config(text=t("view_logs"))
 
         # Update language display
         self._update_language_display()
@@ -499,6 +502,88 @@ class BaseWindow:
                 "main_prompt": "请阅读所提供的文献并根据研究问题进行分析。请严格按照以下JSON格式以中文回答:\n{{{da_section}\n    \"screening_results\": {{\n{criteria_str}\n    }}\n}}"
             }
         }
+
+    def open_log_viewer(self) -> None:
+        """Open a window to view application logs."""
+        from pathlib import Path
+
+        log_file = Path.home() / ".litrx" / "logs" / "litrx.log"
+
+        # Create log viewer window
+        viewer = tk.Toplevel(self.root)
+        viewer.title(t("view_logs"))
+        viewer.geometry("900x600")
+        viewer.transient(self.root)
+
+        # Create text widget with scrollbar
+        text_frame = ttk.Frame(viewer)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        text_scroll = ttk.Scrollbar(text_frame, orient=tk.VERTICAL)
+        log_text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=text_scroll.set, font=("Consolas", 9))
+        text_scroll.config(command=log_text.yview)
+
+        log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        text_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Load and display log file
+        try:
+            if log_file.exists():
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                log_text.insert("1.0", content)
+                # Scroll to end
+                log_text.see(tk.END)
+            else:
+                log_text.insert("1.0", "Log file not found. No logs have been generated yet.")
+        except Exception as e:
+            log_text.insert("1.0", f"Error reading log file: {e}")
+
+        log_text.config(state=tk.DISABLED)
+
+        # Buttons frame
+        button_frame = ttk.Frame(viewer)
+        button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        def refresh_logs():
+            """Refresh log content."""
+            log_text.config(state=tk.NORMAL)
+            log_text.delete("1.0", tk.END)
+            try:
+                if log_file.exists():
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    log_text.insert("1.0", content)
+                    log_text.see(tk.END)
+                else:
+                    log_text.insert("1.0", "Log file not found.")
+            except Exception as e:
+                log_text.insert("1.0", f"Error reading log file: {e}")
+            log_text.config(state=tk.DISABLED)
+
+        def open_log_folder():
+            """Open log folder in file explorer."""
+            import platform
+            import subprocess
+
+            log_dir = log_file.parent
+            if not log_dir.exists():
+                messagebox.showwarning(t("warning"), "Log directory does not exist yet.", parent=viewer)
+                return
+
+            try:
+                if platform.system() == "Windows":
+                    os.startfile(log_dir)
+                elif platform.system() == "Darwin":  # macOS
+                    subprocess.run(["open", log_dir])
+                else:  # Linux
+                    subprocess.run(["xdg-open", log_dir])
+            except Exception as e:
+                messagebox.showerror(t("error"), f"Failed to open folder: {e}", parent=viewer)
+
+        ttk.Button(button_frame, text="Refresh", command=refresh_logs).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Open Log Folder", command=open_log_folder).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text=t("close"), command=viewer.destroy).pack(side=tk.RIGHT, padx=5)
 
     def run(self) -> None:
         self.root.mainloop()
