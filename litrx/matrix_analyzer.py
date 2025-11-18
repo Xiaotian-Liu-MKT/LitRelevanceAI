@@ -47,6 +47,7 @@ from .config import (
     load_env_file,
 )
 from .ai_client import AIClient
+from .utils import AIResponseParser
 
 
 load_env_file()
@@ -398,16 +399,9 @@ def parse_ai_response(
         key = dim['key']
         result[key] = "解析失败"
 
-    # Try to parse JSON
+    # Try to parse JSON using unified parser
     try:
-        # Extract JSON from response (handle markdown code blocks)
-        response_text = ai_response.strip()
-        if response_text.startswith('```'):
-            # Remove markdown code block
-            lines = response_text.split('\n')
-            response_text = '\n'.join(lines[1:-1]) if len(lines) > 2 else response_text
-
-        data = json.loads(response_text)
+        data = AIResponseParser.parse_json_with_fallback(ai_response)
 
         # Extract values for each dimension
         for dim in dimensions:
@@ -417,8 +411,8 @@ def parse_ai_response(
             else:
                 result[key] = "缺失"
 
-    except json.JSONDecodeError as e:
-        # JSON parsing failed, try to salvage what we can
+    except (json.JSONDecodeError, ValueError) as e:
+        # JSON parsing failed completely
         print(f"JSON解析错误: {e}")
         # Keep default "解析失败" values
 

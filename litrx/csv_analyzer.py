@@ -18,6 +18,7 @@ from .ai_client import AIClient
 from .progress_manager import ProgressManager, create_progress_manager
 from .cache import get_cache
 from .logging_config import get_logger
+from .utils import AIResponseParser, ColumnDetector
 
 
 load_env_file()
@@ -87,22 +88,16 @@ Please return in the following JSON format:
         """Read Scopus exported CSV file"""
         try:
             df = pd.read_csv(file_path, encoding='utf-8-sig')
-            # Ensure necessary columns exist
-            required_columns = ['Title', 'Abstract']
-            column_mappings = {
-                'Title': ['Title', '文献标题'],
-                'Abstract': ['Abstract', '摘要']
-            }
-            
-            for col in required_columns:
-                if col not in df.columns:
-                    # Try to find possible alternative column names
-                    for alt_col in column_mappings.get(col, []):
-                        if alt_col in df.columns:
-                            df[col] = df[alt_col]
-                            break
-                    else:
-                        raise ValueError(f"Missing necessary column in CSV file: {col}")
+
+            # Use unified column detection
+            title_col = ColumnDetector.get_required_column(df, 'title')
+            abstract_col = ColumnDetector.get_required_column(df, 'abstract')
+
+            # Normalize column names
+            if title_col != 'Title':
+                df['Title'] = df[title_col]
+            if abstract_col != 'Abstract':
+                df['Abstract'] = df[abstract_col]
             
             # Add columns for analysis results
             if 'Relevance Score' not in df.columns:
@@ -139,28 +134,9 @@ Please return in the following JSON format:
                 temperature=self.config.get("TEMPERATURE", 0.3),
             )
             response_text = response["choices"][0]["message"]["content"].strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-            try:
-                result = json.loads(response_text)
-            except json.JSONDecodeError:
-                import re
-                relevance_score_match = re.search(r'"relevance_score"\s*:\s*(\d+)', response_text)
-                relevance_score = int(relevance_score_match.group(1)) if relevance_score_match else 0
-                analysis_match = re.search(r'"analysis"\s*:\s*"([^"]*)"', response_text)
-                analysis = analysis_match.group(1) if analysis_match else "Unable to extract analysis result from response"
-                lit_review_match = re.search(r'"literature_review_suggestion"\s*:\s*"([^"]*)"', response_text)
-                lit_review = lit_review_match.group(1) if lit_review_match else ""
-                result = {
-                    "relevance_score": relevance_score,
-                    "analysis": analysis,
-                    "literature_review_suggestion": lit_review,
-                }
+
+            # Use unified parser with relevance-specific fallback
+            result = AIResponseParser.parse_relevance_response(response_text)
 
             # Cache the result
             if self.cache:

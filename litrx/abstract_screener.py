@@ -23,6 +23,7 @@ from .config import (
 )
 from .ai_client import AIClient
 from .logging_config import get_logger
+from .utils import AIResponseParser
 
 
 load_env_file()
@@ -355,10 +356,11 @@ def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
 
     try:
         if not ai_json_string or not isinstance(ai_json_string, str):
-            print("错误：AI响应为空或格式不正确。")
+            logger.warning("AI响应为空或格式不正确")
             return final_structure
 
-        data = json.loads(ai_json_string)
+        # Use unified parser with fallback (though json_object format should prevent this)
+        data = AIResponseParser.parse_json_with_fallback(ai_json_string)
 
         if "verification_results" in data:
             data = data.get("verification_results", {})
@@ -372,10 +374,10 @@ def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
 
         return final_structure
 
-    except json.JSONDecodeError as e:
-        print(f"JSON解析错误: {e}。AI原始响应: '{ai_json_string[:500]}...'")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"JSON解析错误: {e}。AI原始响应: '{ai_json_string[:500]}...'")
     except Exception as e:
-        print(f"解析AI响应时发生未知错误: {e}")
+        logger.error(f"解析AI响应时发生未知错误: {e}", exc_info=True)
 
     return final_structure
 

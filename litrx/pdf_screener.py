@@ -42,6 +42,7 @@ from .config import (
     load_env_file,
 )
 from .ai_client import AIClient
+from .utils import AIResponseParser
 
 
 load_env_file()
@@ -197,12 +198,14 @@ def parse_ai_response_json(
     criteria_list: List[str],
     detailed_questions: List[Dict[str, str]],
 ) -> Dict[str, Dict[str, str]]:
-    """Parse the JSON response, ensuring all keys exist."""
+    """Parse the JSON response with fallback, ensuring all keys exist."""
 
     final = {"detailed_analysis": {}, "screening_results": {}}
     try:
-        data = json.loads(ai_json_string)
-    except Exception:
+        # Use unified parser with markdown cleaning and regex fallback
+        data = AIResponseParser.parse_json_with_fallback(ai_json_string)
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"JSON解析失败: {e}")
         for q in detailed_questions:
             final["detailed_analysis"][q["prompt_key"]] = "解析失败"
         for c in criteria_list:
