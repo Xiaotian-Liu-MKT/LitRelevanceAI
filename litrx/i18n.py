@@ -170,6 +170,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "error_no_results": "没有可导出的结果",
         "error_analysis": "错误 {error}",
 
+        # AI Client error messages
+        "error_openai_key_missing": "OpenAI API密钥未配置。请在环境变量、.env文件或配置文件中设置OPENAI_API_KEY。",
+        "error_siliconflow_key_missing": "SiliconFlow API密钥未配置。请在环境变量、.env文件或配置文件中设置SILICONFLOW_API_KEY。",
+        "error_invalid_service": "无效的AI服务 '{service}'。必须是 'openai' 或 'siliconflow'。",
+        "error_ai_request_failed": "AI 请求失败: {error}",
+
         # Success messages
         "results_exported": "结果已导出",
 
@@ -340,6 +346,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "error_read_file": "Failed to read file: {error}",
         "error_no_results": "No results to export",
         "error_analysis": "Error {error}",
+
+        # AI Client error messages
+        "error_openai_key_missing": "OpenAI API key is not configured. Please set OPENAI_API_KEY in environment variables, .env file, or config file.",
+        "error_siliconflow_key_missing": "SiliconFlow API key is not configured. Please set SILICONFLOW_API_KEY in environment variables, .env file, or config file.",
+        "error_invalid_service": "Invalid AI service '{service}'. Must be 'openai' or 'siliconflow'.",
+        "error_ai_request_failed": "AI request failed: {error}",
 
         # Success messages
         "results_exported": "Results exported successfully",

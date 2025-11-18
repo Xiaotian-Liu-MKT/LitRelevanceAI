@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 from .config import DEFAULT_CONFIG as BASE_CONFIG, load_config as base_load_config
+from .i18n import t
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -41,7 +42,7 @@ class AIClient:
             api_key = config.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
             if not api_key:
                 logger.error("OpenAI API key not configured")
-                raise RuntimeError("OpenAI API密钥未配置。")
+                raise RuntimeError(t("error_openai_key_missing"))
             api_base = config.get("API_BASE") or os.getenv("API_BASE") or None
             logger.debug(f"OpenAI API base: {api_base if api_base else 'default'}")
 
@@ -49,16 +50,14 @@ class AIClient:
             api_key = config.get("SILICONFLOW_API_KEY") or os.getenv("SILICONFLOW_API_KEY")
             if not api_key:
                 logger.error("SiliconFlow API key not configured")
-                raise RuntimeError("SiliconFlow API密钥未配置。")
+                raise RuntimeError(t("error_siliconflow_key_missing"))
             # SiliconFlow uses OpenAI-compatible API
             api_base = "https://api.siliconflow.cn/v1"
             logger.debug(f"SiliconFlow API base: {api_base}")
 
         else:
             logger.error(f"Invalid AI service: {service}")
-            raise RuntimeError(
-                f"无效的AI服务 '{service}'。必须是 'openai' 或 'siliconflow'。"
-            )
+            raise RuntimeError(t("error_invalid_service", service=service))
 
         self.model = model
         self.service = service
@@ -103,4 +102,4 @@ class AIClient:
 
         except Exception as e:
             logger.error(f"AI request failed: {e}", exc_info=True)
-            raise RuntimeError(f"AI 请求失败: {e}") from e
+            raise RuntimeError(t("error_ai_request_failed", error=str(e))) from e
