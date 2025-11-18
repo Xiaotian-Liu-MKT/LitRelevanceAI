@@ -6,6 +6,10 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
+
 # Translation dictionary
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "zh": {
@@ -438,7 +442,12 @@ class I18n:
             try:
                 callback()
             except Exception as e:
-                print(f"Error notifying observer: {e}")
+                # 使用 logger 而不是 print，包含完整堆栈跟踪
+                callback_name = getattr(callback, '__name__', repr(callback))
+                logger.error(
+                    f"Observer callback failed: {callback_name}",
+                    exc_info=True  # 包含完整堆栈跟踪
+                )
 
 # Global i18n instance
 _i18n_instance = None
