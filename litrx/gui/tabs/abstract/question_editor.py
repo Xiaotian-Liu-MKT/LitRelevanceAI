@@ -7,7 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from ....i18n import t
 
@@ -24,7 +24,7 @@ class QuestionEditor:
         mode: str,
         q_config_path: Path,
         modes_data: dict,
-        on_save_callback: Optional[callable] = None
+        on_save_callback: Optional[Callable[[dict, str], None]] = None
     ):
         """
         Initialize the question editor.

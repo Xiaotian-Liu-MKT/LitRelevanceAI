@@ -5,6 +5,7 @@ and better error handling throughout the application.
 """
 
 from __future__ import annotations
+from typing import List, Optional
 
 
 class LitRxError(Exception):
@@ -64,7 +65,7 @@ class APIRequestError(LitRxError):
 class FileFormatError(LitRxError):
     """File format is invalid or unsupported."""
 
-    def __init__(self, file_path: str, expected_format: str = None, details: str = None):
+    def __init__(self, file_path: str, expected_format: Optional[str] = None, details: Optional[str] = None):
         self.file_path = file_path
         self.expected_format = expected_format
         message = f"文件格式错误: {file_path}\n"
@@ -97,7 +98,7 @@ class ColumnNotFoundError(FileFormatError):
 class InvalidFileFormatError(FileFormatError):
     """File format is not supported."""
 
-    def __init__(self, file_path: str, supported_formats: list = None):
+    def __init__(self, file_path: str, supported_formats: Optional[List[str]] = None):
         supported = supported_formats or ['.csv', '.xlsx', '.xls']
         message = (
             f"不支持的文件格式: {file_path}\n"
@@ -112,7 +113,7 @@ class InvalidFileFormatError(FileFormatError):
 class DataValidationError(LitRxError):
     """Data validation failed."""
 
-    def __init__(self, message: str, row_index: int = None):
+    def __init__(self, message: str, row_index: Optional[int] = None):
         self.row_index = row_index
         if row_index is not None:
             full_message = f"数据验证失败 (行 {row_index + 1}): {message}"
@@ -131,7 +132,7 @@ class TaskCancelledException(LitRxError):
 class ProgressRecoveryError(LitRxError):
     """Failed to recover progress from checkpoint."""
 
-    def __init__(self, checkpoint_path: str, details: str = None):
+    def __init__(self, checkpoint_path: str, details: Optional[str] = None):
         message = f"无法恢复进度: {checkpoint_path}\n"
         if details:
             message += f"详细信息: {details}\n"
@@ -142,7 +143,7 @@ class ProgressRecoveryError(LitRxError):
 class ModelNotSupportedError(ConfigurationError):
     """AI model is not supported by the current service."""
 
-    def __init__(self, model: str, service: str, supported_models: list = None):
+    def __init__(self, model: str, service: str, supported_models: Optional[List[str]] = None):
         self.model = model
         self.service = service
         message = f"模型 '{model}' 不支持 {service} 服务\n"
@@ -154,7 +155,7 @@ class ModelNotSupportedError(ConfigurationError):
 class RateLimitError(APIRequestError):
     """API rate limit exceeded."""
 
-    def __init__(self, service: str = "AI", retry_after: int = None):
+    def __init__(self, service: str = "AI", retry_after: Optional[int] = None):
         self.retry_after = retry_after
         message = (
             f"{service} API 速率限制已达到\n"

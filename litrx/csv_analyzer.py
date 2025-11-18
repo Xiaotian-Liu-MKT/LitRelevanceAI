@@ -169,18 +169,18 @@ Please return in the following JSON format:
 
             # Check for existing checkpoint
             if progress_mgr.has_checkpoint():
-                print("\n" + "="*60)
-                print(progress_mgr.get_resume_prompt())
-                print("="*60)
+                logger.info("\n" + "="*60)
+                logger.info(progress_mgr.get_resume_prompt())
+                logger.info("="*60)
                 # For CLI, ask user; for GUI, this should be handled by caller
                 # For now, auto-resume in CLI mode
                 checkpoint_df = progress_mgr.load_dataframe()
                 checkpoint_meta = progress_mgr.load_checkpoint()
                 if checkpoint_df is not None and checkpoint_meta:
-                    print("Resuming from checkpoint...")
+                    logger.info("Resuming from checkpoint...")
                     df = checkpoint_df
                     start_idx = checkpoint_meta.get('last_index', 0)
-                    print(f"Resuming from row {start_idx}")
+                    logger.info(f"Resuming from row {start_idx}")
                 else:
                     start_idx = 0
             else:
@@ -194,11 +194,11 @@ Please return in the following JSON format:
                 if idx < start_idx:
                     continue
 
-                print(f"\nAnalyzing paper {i}/{total}...")
-                print(f"Title: {row['Title']}")
+                logger.info(f"\nAnalyzing paper {i}/{total}...")
+                logger.info(f"Title: {row['Title']}")
 
                 if pd.isna(row['Title']) or pd.isna(row['Abstract']):
-                    print(f"Warning: The title or abstract of this paper is empty, skipped")
+                    logger.warning(f"Warning: The title or abstract of this paper is empty, skipped")
                     if progress_callback:
                         progress_callback(idx, total, None)
                     continue
@@ -208,8 +208,8 @@ Please return in the following JSON format:
                 result['index'] = idx  # Store index for later update
                 results.append(result)
 
-                print(f"Relevance Score: {result['relevance_score']}")
-                print(f"Analysis Result: {result['analysis'][:200]}...")
+                logger.info(f"Relevance Score: {result['relevance_score']}")
+                logger.info(f"Analysis Result: {result['analysis'][:200]}...")
 
                 # Apply result to DataFrame
                 self.apply_result_to_dataframe(df, idx, result)
@@ -231,11 +231,11 @@ Please return in the following JSON format:
                 time.sleep(1)
 
         except KeyboardInterrupt:
-            print("\nProgram interrupted by user. Saving checkpoint...")
+            logger.warning("\nProgram interrupted by user. Saving checkpoint...")
             if progress_mgr:
                 progress_mgr.save_checkpoint(df, idx, metadata={'interrupted': True})
         except Exception as e:
-            print(f"\nError during analysis: {e}")
+            logger.error(f"\nError during analysis: {e}")
             if progress_mgr:
                 progress_mgr.save_checkpoint(df, idx, metadata={'error': str(e)})
             raise
@@ -244,7 +244,7 @@ Please return in the following JSON format:
             if len(results) > 0:
                 if progress_mgr:
                     progress_mgr.finalize_results(df)
-                    print(f"\nAnalysis complete! Results saved to: {progress_mgr.output_path}")
+                    logger.info(f"\nAnalysis complete! Results saved to: {progress_mgr.output_path}")
                 else:
                     self.save_results(df, original_file_path)
 
@@ -253,7 +253,7 @@ Please return in the following JSON format:
                 total_requests = self.cache_hits + self.cache_misses
                 hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
                 logger.info(f"Cache statistics: {self.cache_hits} hits, {self.cache_misses} misses ({hit_rate:.1f}% hit rate)")
-                print(f"\nCache performance: {self.cache_hits} hits, {self.cache_misses} misses ({hit_rate:.1f}% hit rate)")
+                logger.info(f"\nCache performance: {self.cache_hits} hits, {self.cache_misses} misses ({hit_rate:.1f}% hit rate)")
 
         return results
 
@@ -286,16 +286,16 @@ Please return in the following JSON format:
 
             # Save to new CSV file
             df.to_csv(new_file_path, index=False, encoding='utf-8-sig')
-            
+
             if not is_interim:
-                print(f"\nAnalysis results saved to: {os.path.abspath(new_file_path)}")
+                logger.info(f"\nAnalysis results saved to: {os.path.abspath(new_file_path)}")
         except Exception as e:
-            print(f"Error saving results: {str(e)}")
+            logger.error(f"Error saving results: {str(e)}")
 
 
 def get_user_input():
     """Get user input configuration information"""
-    print("Welcome to the Literature Relevance Analysis Tool!\n")
+    logger.info("Welcome to the Literature Relevance Analysis Tool!\n")
 
     config = DEFAULT_CONFIG.copy()
 
@@ -309,7 +309,7 @@ def get_user_input():
             config["AI_SERVICE"] = "gemini"
             config["MODEL_NAME"] = "gemini-2.0-flash"
             break
-        print("Invalid choice, please enter 1 or 2")
+        logger.warning("Invalid choice, please enter 1 or 2")
 
     # Get research topic
     research_topic = input("\nPlease enter your research topic: ").strip()
@@ -328,12 +328,12 @@ def get_user_input():
         if os.path.exists(abs_path):
             break
         else:
-            print(f"File not found: {abs_path}")
-            print("Please ensure:")
-            print("1. The file path is correct")
-            print("2. The file actually exists")
-            print("3. If the path contains spaces, enclose it in quotes")
-            print("Tip: You can drag the file directly into the terminal window\n")
+            logger.error(f"File not found: {abs_path}")
+            logger.info("Please ensure:")
+            logger.info("1. The file path is correct")
+            logger.info("2. The file actually exists")
+            logger.info("3. If the path contains spaces, enclose it in quotes")
+            logger.info("Tip: You can drag the file directly into the terminal window\n")
 
     config["INPUT_FILE_PATH"] = abs_path
     return research_topic, abs_path, config
@@ -345,27 +345,27 @@ def main():
         research_topic, file_path, user_cfg = get_user_input()
         config.update(user_cfg)
 
-        print("\nInitializing analyzer...")
+        logger.info("\nInitializing analyzer...")
         analyzer = LiteratureAnalyzer(config, research_topic, questions)
 
-        print("Reading literature data...")
+        logger.info("Reading literature data...")
         df = analyzer.read_scopus_csv(file_path)
 
-        print(f"\nFound {len(df)} papers, starting analysis...\n")
+        logger.info(f"\nFound {len(df)} papers, starting analysis...\n")
         results = analyzer.batch_analyze(df, file_path)  # Pass the actual file path instead of a string constant
 
         # Print summary statistics
         relevance_scores = [r['relevance_score'] for r in results]
-        print("\nAnalysis complete!")
-        print(f"Total number of papers: {len(results)}")
+        logger.info("\nAnalysis complete!")
+        logger.info(f"Total number of papers: {len(results)}")
         if relevance_scores:
-            print(f"Average relevance score: {sum(relevance_scores) / len(relevance_scores):.2f}")
-            print(f"Number of highly relevant papers (score >= 80): {len([s for s in relevance_scores if s >= 80])}")
+            logger.info(f"Average relevance score: {sum(relevance_scores) / len(relevance_scores):.2f}")
+            logger.info(f"Number of highly relevant papers (score >= 80): {len([s for s in relevance_scores if s >= 80])}")
 
     except Exception as e:
-        print(f"\nProgram error: {str(e)}")
+        logger.error(f"\nProgram error: {str(e)}")
         import traceback
-        print("\nDetailed error information:")
-        print(traceback.format_exc())
+        logger.error("\nDetailed error information:")
+        logger.error(traceback.format_exc())
 
     input("\nPress Enter to exit the program...")

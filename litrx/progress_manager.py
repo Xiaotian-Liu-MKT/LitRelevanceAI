@@ -175,7 +175,7 @@ class ProgressManager:
             if self.checkpoint_json.exists():
                 self.checkpoint_json.unlink()
         except Exception as e:
-            print(f"Warning: Failed to clear checkpoint: {e}")
+            logger.warning(f"Warning: Failed to clear checkpoint: {e}")
 
     def get_resume_prompt(self) -> Optional[str]:
         """Get a user-friendly message about available checkpoint.

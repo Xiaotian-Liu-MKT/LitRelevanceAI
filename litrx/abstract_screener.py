@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import openpyxl
 import pandas as pd
@@ -88,7 +88,7 @@ def load_mode_questions(mode: str) -> Dict[str, Any]:
                     "settings": data.get("settings", {}),
                 }
         except Exception as e:
-            print(f"警告: 加载统一配置失败: {e}")
+            logger.warning(f"警告: 加载统一配置失败: {e}")
 
     # Fall back to legacy format
     legacy_path = Path(__file__).resolve().parent.parent / "questions_config.json"
@@ -125,13 +125,13 @@ def load_config(path: Optional[str] = None, mode: Optional[str] = None) -> Tuple
 def get_file_path_from_config(config):
     file_path = config['INPUT_FILE_PATH']
     if not file_path or file_path == 'your_input_file.xlsx':
-         print("错误：输入文件路径未在CONFIG中正确配置。")
+         logger.error("错误：输入文件路径未在CONFIG中正确配置。")
          sys.exit(1)
     if not os.path.exists(file_path):
-        print(f"错误：配置文件中指定的文件路径 '{file_path}' 不存在。")
+        logger.error(f"错误：配置文件中指定的文件路径 '{file_path}' 不存在。")
         sys.exit(1)
     if not (file_path.endswith('.csv') or file_path.endswith('.xlsx')):
-        print(f"错误：文件 '{file_path}' 不是支持的CSV或Excel格式。")
+        logger.error(f"错误：文件 '{file_path}' 不是支持的CSV或Excel格式。")
         sys.exit(1)
     return file_path
 
@@ -208,7 +208,7 @@ def load_and_validate_data(file_path, config, title_column=None, abstract_column
                 f"请在GUI中手动选择摘要列。"
             )
 
-    print(f"成功识别列 - 标题: '{title_column}', 摘要: '{abstract_column}'")
+    logger.info(f"成功识别列 - 标题: '{title_column}', 摘要: '{abstract_column}'")
     return df, title_column, abstract_column
 
 def prepare_dataframe(df, open_questions, yes_no_questions):
@@ -255,7 +255,7 @@ def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_qu
 
 def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_no_questions, max_retries=3):
     def build_error_response(msg):
-        data = {"quick_analysis": {}, "screening_results": {}}
+        data: Dict[str, Dict[str, str]] = {"quick_analysis": {}, "screening_results": {}}
         for q in open_questions:
             data["quick_analysis"][q['key']] = msg
         for q in yes_no_questions:
@@ -271,7 +271,7 @@ def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_
             )
             return response['choices'][0]['message']['content'].strip()
         except Exception as e:
-            print(f"第 {attempt + 1} 次尝试失败: {e}")
+            logger.warning(f"第 {attempt + 1} 次尝试失败: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
             else:
@@ -395,7 +395,7 @@ def verify_ai_response(title, abstract, initial_json, client, open_questions, ye
         content = response["choices"][0]["message"]["content"].strip()
         return parse_ai_response_json(content, open_questions, yes_no_questions)
     except Exception as e:
-        print(f"验证AI响应失败: {e}")
+        logger.error(f"验证AI响应失败: {e}")
         return {
             "quick_analysis": {q["key"]: "验证失败" for q in open_questions},
             "screening_results": {q["key"]: "验证失败" for q in yes_no_questions},
@@ -623,7 +623,7 @@ class AbstractScreener:
         abstract_col: str,
         open_questions: List[Dict],
         yes_no_questions: List[Dict],
-        progress_callback: Optional[callable] = None,
+        progress_callback: Optional[Callable[[int, int, Optional[Dict[str, Any]]], None]] = None,
         stop_event: Optional[Any] = None
     ) -> pd.DataFrame:
         """Analyze multiple articles concurrently.
@@ -760,17 +760,17 @@ class AbstractScreener:
 
 # --- 主程序 ---
 def main():
-    print("--- AI辅助文献分析脚本启动 ---")
+    logger.info("--- AI辅助文献分析脚本启动 ---")
 
     config, questions = load_config()
 
-    print("正在初始化AI客户端...")
+    logger.info("正在初始化AI客户端...")
     client = AIClient(config)
 
     open_questions = questions.get('open_questions', [])
     yes_no_questions = questions.get('yes_no_questions', [])
 
-    print("正在加载数据文件...")
+    logger.info("正在加载数据文件...")
     input_file_path = get_file_path_from_config(config)
     df, title_col, abstract_col = load_and_validate_data(input_file_path, config)
 
@@ -783,16 +783,16 @@ def main():
     if os.path.exists(temp_path):
         try:
             df = pd.read_csv(temp_path) if temp_path.endswith('.csv') else pd.read_excel(temp_path)
-            print("已加载临时进度文件。")
+            logger.info("已加载临时进度文件。")
         except Exception as e:
-            print(f"加载临时文件失败: {e}")
+            logger.error(f"加载临时文件失败: {e}")
 
     start_index = resume_from_progress(output_file_path)
     total_articles = len(df)
-    print(f"共找到 {total_articles} 篇文章待处理。")
+    logger.info(f"共找到 {total_articles} 篇文章待处理。")
 
     for index, row in df.iloc[start_index:].iterrows():
-        print(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
+        logger.info(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
         analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config, client)
         save_progress(df, output_file_path, index)
         time.sleep(config['API_REQUEST_DELAY'])
@@ -802,9 +802,9 @@ def main():
             df.to_csv(output_file_path, index=False, encoding='utf-8-sig')
         elif output_file_path.endswith('.xlsx'):
             df.to_excel(output_file_path, index=False, engine='openpyxl')
-        print(f"\n处理完成！结果已保存到: {output_file_path}")
+        logger.info(f"\n处理完成！结果已保存到: {output_file_path}")
     except Exception as e:
-        print(f"保存结果文件时出错: {e}")
+        logger.error(f"保存结果文件时出错: {e}")
 
     if os.path.exists(temp_path):
         os.remove(temp_path)
@@ -814,9 +814,9 @@ def main():
 
     criteria_columns = [q['column_name'] for q in yes_no_questions]
     summary = generate_weekly_summary(df, criteria_columns)
-    print("筛选摘要：", summary)
+    logger.info(f"筛选摘要： {summary}")
 
-    print("--- 脚本执行完毕 ---")
+    logger.info("--- 脚本执行完毕 ---")
 
 def run_gui():
     """创建增强的GUI界面"""

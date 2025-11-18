@@ -28,7 +28,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 import openpyxl  # noqa: F401
@@ -48,10 +48,12 @@ from .config import (
 )
 from .ai_client import AIClient
 from .constants import TITLE_SIMILARITY_THRESHOLD, FUZZY_MATCH_MIN_SCORE
+from .logging_config import get_logger
 from .utils import AIResponseParser
 
 
 load_env_file()
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +416,7 @@ def parse_ai_response(
 
     except (json.JSONDecodeError, ValueError) as e:
         # JSON parsing failed completely
-        print(f"JSON解析错误: {e}")
+        logger.error(f"JSON解析错误: {e}")
         # Keep default "解析失败" values
 
     return result
@@ -429,8 +431,8 @@ def process_literature_matrix(
     metadata_path: Optional[str],
     matrix_config: Dict[str, Any],
     app_config: Dict[str, Any],
-    progress_callback: Optional[callable] = None,
-    status_callback: Optional[callable] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    status_callback: Optional[Callable[[str, str], None]] = None,
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     """Main processing function for literature matrix analysis.
 
@@ -472,7 +474,7 @@ def process_literature_matrix(
             mapping_df = build_pdf_metadata_mapping(pdf_files, metadata_df, matching_config)
 
         except Exception as e:
-            print(f"元数据加载失败: {e}")
+            logger.error(f"元数据加载失败: {e}")
             metadata_df = None
 
     # Get dimensions and construct prompt
@@ -517,7 +519,7 @@ def process_literature_matrix(
                 status_callback(pdf, "完成")
 
         except Exception as e:
-            print(f"处理 {pdf} 时出错: {e}")
+            logger.error(f"处理 {pdf} 时出错: {e}")
             row = {'PDF_File': pdf, 'Error': str(e)}
             results.append(row)
 
@@ -598,14 +600,14 @@ Example:
 
     # Validate inputs
     if not os.path.isdir(args.pdf_folder):
-        print(f"错误：PDF文件夹不存在: {args.pdf_folder}")
+        logger.error(f"错误：PDF文件夹不存在: {args.pdf_folder}")
         sys.exit(1)
 
     # Process
-    print("开始处理文献矩阵分析...")
-    print(f"PDF文件夹: {args.pdf_folder}")
+    logger.info("开始处理文献矩阵分析...")
+    logger.info(f"PDF文件夹: {args.pdf_folder}")
     if args.metadata_file:
-        print(f"元数据文件: {args.metadata_file}")
+        logger.info(f"元数据文件: {args.metadata_file}")
 
     try:
         results_df, mapping_df = process_literature_matrix(
@@ -619,14 +621,14 @@ Example:
         output_config = matrix_config.get('output', {})
         output_path = save_results(results_df, mapping_df, args.pdf_folder, output_config)
 
-        print(f"\n✓ 处理完成！结果已保存到: {output_path}")
+        logger.info(f"\n✓ 处理完成！结果已保存到: {output_path}")
 
         if mapping_df is not None:
             matched_count = (mapping_df['Match_Status'] != 'not_matched').sum()
-            print(f"✓ 元数据匹配: {matched_count}/{len(mapping_df)} 个PDF成功匹配")
+            logger.info(f"✓ 元数据匹配: {matched_count}/{len(mapping_df)} 个PDF成功匹配")
 
     except Exception as e:
-        print(f"\n✗ 处理失败: {e}")
+        logger.error(f"\n✗ 处理失败: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

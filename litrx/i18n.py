@@ -4,7 +4,7 @@ Provides language support for Chinese and English.
 """
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Callable, Dict, List
 
 from .logging_config import get_logger
 
@@ -376,7 +376,7 @@ class I18n:
             default_language: Default language code ('zh' or 'en')
         """
         self._current_language = default_language
-        self._observers = []
+        self._observers: List[Callable[[], None]] = []
 
     @property
     def current_language(self) -> str:
