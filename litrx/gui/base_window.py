@@ -10,6 +10,10 @@ from ..tk_compat import ensure_native_macos_version
 # This environment variable disables the strict version check
 # MUST be set before importing tkinter
 ensure_native_macos_version()
+if platform.system() == "Darwin":  # macOS
+    previous_compat = os.environ.get("SYSTEM_VERSION_COMPAT")
+    if previous_compat != "0":
+        os.environ["SYSTEM_VERSION_COMPAT"] = "0"
 
 import tkinter as tk
 from pathlib import Path
