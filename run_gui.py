@@ -2,13 +2,22 @@
 
 Run:
     python run_gui.py
-    
+
 The script checks for required packages and installs them if missing.
 """
 
 import importlib
+import os
 import subprocess
 import sys
+import platform
+
+# Fix for macOS Tk version check issue
+# On newer macOS versions, Tk's version check can fail with errors like:
+# "macOS 26 (2600) or later required, have instead 16 (1600)"
+# This environment variable disables the strict version check
+if platform.system() == "Darwin":  # macOS
+    os.environ.setdefault("SYSTEM_VERSION_COMPAT", "0")
 
 
 DEPENDENCIES = {
