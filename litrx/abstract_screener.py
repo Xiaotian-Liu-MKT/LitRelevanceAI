@@ -24,6 +24,7 @@ from .config import (
 from .ai_client import AIClient
 from .constants import DEFAULT_MAX_WORKERS, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from .logging_config import get_logger
+from .prompt_builder import PromptBuilder
 from .utils import AIResponseParser
 
 
@@ -220,83 +221,33 @@ def prepare_dataframe(df, open_questions, yes_no_questions):
     return df
 
 def construct_ai_prompt(title, abstract, research_question, screening_criteria, detailed_analysis_questions, prompts=None):
-    """Construct detailed analysis prompt using template."""
+    """Construct detailed analysis prompt using PromptBuilder."""
     if prompts is None:
         prompts = load_prompts()
 
-    criteria_prompts_str = ",\n".join([f'        "{criterion}": "请回答 \'是\', \'否\', 或 \'不确定\'"' for criterion in screening_criteria])
-
-    detailed_analysis_prompts_list = []
-    if detailed_analysis_questions: # 仅当定义了细化问题时才构建这部分
-        for q_config in detailed_analysis_questions:
-            detailed_analysis_prompts_list.append(f'        "{q_config["prompt_key"]}": "{q_config["question_text"]}"')
-    detailed_analysis_prompts_str = ",\n".join(detailed_analysis_prompts_list)
-
-    # 构建 detailed_analysis 部分，仅当存在细化问题时
-    detailed_analysis_section = ""
-    if detailed_analysis_prompts_str:
-        detailed_analysis_section = f"""
-    "detailed_analysis": {{
-{detailed_analysis_prompts_str}
-    }},""" # 注意这里末尾的逗号，如果 screening_results 存在则需要
-
-    # Use template from prompts_config.json or fall back to default
-    template = prompts.get("detailed_prompt", """请仔细阅读以下文献的标题和摘要,并结合给定的理论模型/研究问题进行分析。
-请严格按照以下JSON格式返回您的分析结果,所有文本内容请使用中文:
-
-文献标题:{title}
-文献摘要:{abstract}
-
-理论模型/研究问题:{research_question}
-
-JSON输出格式要求:
-{{
-{detailed_analysis_section}
-    "screening_results": {{
-{criteria_prompts_str}
-    }}
-}}
-
-重要提示:
-1.  对于 "detailed_analysis" 内的每一个子问题(如果存在),请提供简洁、针对性的中文回答。如果摘要中信息不足以回答某个子问题,请注明"摘要未提供相关信息"。
-2.  对于 "screening_results" 中的每一个筛选条件,请仅使用 "是"、"否" 或 "不确定" 作为回答。
-3.  确保整个输出是一个合法的JSON对象。
-""")
-
-    return template.format(
+    builder = PromptBuilder(prompts)
+    return builder.build_screening_prompt(
         title=title,
         abstract=abstract,
         research_question=research_question,
-        detailed_analysis_section=detailed_analysis_section,
-        criteria_prompts_str=criteria_prompts_str
+        criteria=screening_criteria,
+        detailed_questions=detailed_analysis_questions
     )
 
 
 def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_questions):
-    """Construct prompt using templates from prompts_config.json."""
+    """Construct prompt using PromptBuilder."""
     prompts = load_prompts()
+    builder = PromptBuilder(prompts)
 
     if config.get('GENERAL_SCREENING_MODE') or not config.get('RESEARCH_QUESTION'):
-        open_q_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in open_questions])
-        yes_no_str = ",\n".join([f'        "{q["key"]}": "{q["question"]}"' for q in yes_no_questions])
-
-        # Use template from prompts_config.json or fall back to default
-        template = prompts.get("quick_prompt", """请快速分析以下文献的标题和摘要,帮助进行每周文献筛选:
-
-文献标题:{title}
-文献摘要:{abstract}
-
-请按以下JSON格式回答:
-{{
-    "quick_analysis": {{
-{open_q_str}
-    }},
-    "screening_results": {{
-{yes_no_str}
-    }}
-}}""")
-
-        return template.format(title=title, abstract=abstract, open_q_str=open_q_str, yes_no_str=yes_no_str)
+        return builder.build_flexible_prompt(
+            title=title,
+            abstract=abstract,
+            open_questions=open_questions,
+            yes_no_questions=yes_no_questions,
+            general_mode=True
+        )
     else:
         screening_criteria = [q['question'] for q in yes_no_questions]
         detailed = [{'prompt_key': q['key'], 'question_text': q['question'], 'df_column_name': q['column_name']} for q in open_questions]
