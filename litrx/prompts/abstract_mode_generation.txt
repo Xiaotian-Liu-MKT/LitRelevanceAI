@@ -6,24 +6,23 @@ The user wants to create a literature screening mode with the following requirem
 {user_description}
 """
 
-Please generate a screening mode configuration in JSON format with this exact structure:
+Please generate a screening mode configuration in JSON using the NEW schema:
 
 {
-  "mode_key": "descriptive_key_in_snake_case",
-  "description": "Brief description in {language}",
-  "yes_no_questions": [
-    {"key": "english_key", "question": "Question text in {language}?", "column_name": "Column in {language}"}
+  "mode_name": "Human-readable name (in {language})",
+  "description": "Brief description (in {language})",
+  "criteria": [
+    {"type": "yes_no", "key": "english_key", "question": "{language} text?", "column_name": "{language} column"}
   ],
-  "open_questions": [
-    {"key": "english_key", "question": "Question text in {language}?", "column_name": "Column in {language}"}
+  "questions": [
+    {"type": "text", "key": "english_key", "question": "{language} text?", "column_name": "{language} column"}
   ]
 }
 
 Guidelines:
-1. Use yes/no questions for binary judgments
-2. Use open questions for descriptive or extractive information
-3. Keys must be in English snake_case (e.g., sample_size)
-4. Questions and column names must be in {language}
-5. 3-6 yes/no questions, 2-4 open questions
-6. Output ONLY JSON. No markdown, no explanations
-
+1. Put binary screening items under "criteria" with type "yes_no".
+2. Put descriptive/extractive items under "questions" with type "text".
+3. Keys must be English snake_case (e.g., sample_size).
+4. Questions and column names must be in {language}.
+5. 3–6 criteria items, 2–4 questions.
+6. Output ONLY JSON. No markdown, no explanations.

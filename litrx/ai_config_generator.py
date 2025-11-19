@@ -116,17 +116,12 @@ class AbstractModeGenerator:
             logger.error("Payload preview (first 500 chars): %s", payload[:500])
             raise RuntimeError(f"解析AI返回失败: {e}\n片段: {str(payload)[:400]}")
 
-        # Validate structure
-        logger.info("Validating mode structure")
-        try:
-            self._validate_mode(data)
-            logger.info("Mode validation passed")
-        except Exception as e:
-            logger.error("Mode validation failed: %s", e, exc_info=True)
-            raise
+        # Normalize schema: legacy -> unified (mode_name/criteria/questions)
+        unified = self._normalize_mode_schema(data)
+        logger.info("Unified schema keys=%s", list(unified.keys()))
 
         logger.info("generate_mode completed successfully")
-        return data
+        return unified
 
     def _validate_mode(self, data: Dict[str, Any]) -> None:
         for k in ("mode_key", "description", "yes_no_questions", "open_questions"):
@@ -157,6 +152,48 @@ class AbstractModeGenerator:
             "  \"yes_no_questions\": [{{\"key\": \"...\", \"question\": \"...\", \"column_name\": \"...\"}}],\n"
             "  \"open_questions\": [{{\"key\": \"...\", \"question\": \"...\", \"column_name\": \"...\"}}]\n}}"
         )
+
+    def _normalize_mode_schema(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize model output to dialog's schema.
+
+        Accepts either legacy keys (mode_key, yes_no_questions, open_questions)
+        or the new keys (mode_name, criteria, questions). Returns the new schema:
+        {
+          mode_name: str,
+          description: str,
+          criteria: [ {type,key,question,column_name}... ],
+          questions: [ {type,key,question,column_name}... ]
+        }
+        """
+        # If already new schema, ensure required keys exist
+        if isinstance(data, dict) and ("criteria" in data or "questions" in data):
+            return {
+                "mode_name": data.get("mode_name") or data.get("mode_key") or "new_mode",
+                "description": data.get("description", ""),
+                "criteria": data.get("criteria", []) or [],
+                "questions": data.get("questions", []) or [],
+            }
+
+        def map_items(items, default_type: str):
+            mapped = []
+            if isinstance(items, list):
+                for it in items:
+                    if isinstance(it, dict):
+                        mapped.append({
+                            "type": it.get("type", default_type),
+                            "key": it.get("key", ""),
+                            "question": it.get("question", ""),
+                            "column_name": it.get("column_name", ""),
+                        })
+            return mapped
+
+        # Legacy mapping
+        return {
+            "mode_name": data.get("mode_name") or data.get("mode_key") or "new_mode",
+            "description": data.get("description", ""),
+            "criteria": map_items(data.get("yes_no_questions", []), "yes_no"),
+            "questions": map_items(data.get("open_questions", []), "text"),
+        }
 
 
 class MatrixDimensionGenerator:

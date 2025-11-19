@@ -694,7 +694,48 @@ class AbstractTab(QWidget):
                     data = {}
 
                 mode = dlg.result
-                key = mode.get('mode_key', 'new_mode')
+                # Normalize: support new schema (mode_name/criteria/questions)
+                def _slugify(s: str) -> str:
+                    s = s or 'new_mode'
+                    out = []
+                    for ch in s:
+                        out.append(ch.lower() if ch.isalnum() else '_')
+                    slug = ''.join(out).strip('_')
+                    while '__' in slug:
+                        slug = slug.replace('__', '_')
+                    return slug or 'new_mode'
+
+                if 'mode_name' in mode or 'criteria' in mode or 'questions' in mode:
+                    key = _slugify(mode.get('mode_name', 'new_mode'))
+                    yes_no_questions = []
+                    for it in mode.get('criteria', []) or []:
+                        if isinstance(it, dict):
+                            yes_no_questions.append({
+                                'key': it.get('key', ''),
+                                'question': it.get('question', ''),
+                                'column_name': it.get('column_name', ''),
+                            })
+                    open_questions = []
+                    for it in mode.get('questions', []) or []:
+                        if isinstance(it, dict):
+                            open_questions.append({
+                                'key': it.get('key', ''),
+                                'question': it.get('question', ''),
+                                'column_name': it.get('column_name', ''),
+                            })
+                    legacy_mode = {
+                        'description': mode.get('description', ''),
+                        'yes_no_questions': yes_no_questions,
+                        'open_questions': open_questions,
+                    }
+                else:
+                    # Legacy schema path
+                    key = mode.get('mode_key', 'new_mode')
+                    legacy_mode = {
+                        'description': mode.get('description', ''),
+                        'yes_no_questions': mode.get('yes_no_questions', []),
+                        'open_questions': mode.get('open_questions', []),
+                    }
                 if key in data:
                     # Custom dialog with localized buttons
                     box = QMessageBox(self)
@@ -721,11 +762,7 @@ class AbstractTab(QWidget):
                 else:
                     do_backup = False
 
-                data[key] = {
-                    'description': mode.get('description', ''),
-                    'yes_no_questions': mode.get('yes_no_questions', []),
-                    'open_questions': mode.get('open_questions', []),
-                }
+                data[key] = legacy_mode
                 self._write_questions_config(data, backup=do_backup)
 
                 # refresh combo

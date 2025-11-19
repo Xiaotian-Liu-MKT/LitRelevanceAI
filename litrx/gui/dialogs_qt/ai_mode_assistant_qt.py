@@ -169,13 +169,20 @@ class AIModeAssistantDialog(QDialog):
             self.selection_layout.addWidget(criteria_label)
 
             for idx, criterion in enumerate(data["criteria"]):
+                # Build a row with checkbox + word-wrapped label
+                row = QWidget()
+                row_lay = QHBoxLayout(row)
+                row_lay.setContentsMargins(0, 0, 0, 0)
                 cb = QCheckBox()
                 cb.setChecked(True)  # Default: all selected
+                label = QLabel()
+                label.setWordWrap(True)
                 question = criterion.get("question", "")
                 type_info = criterion.get("type", "yes_no")
-                cb.setText(f"{question} ({type_info})")
-                cb.setWordWrap(True)
-                self.selection_layout.addWidget(cb)
+                label.setText(f"{question} ({type_info})")
+                row_lay.addWidget(cb)
+                row_lay.addWidget(label, 1)
+                self.selection_layout.addWidget(row)
                 self._criteria_checkboxes.append(cb)
 
         # Add questions section
@@ -184,13 +191,19 @@ class AIModeAssistantDialog(QDialog):
             self.selection_layout.addWidget(questions_label)
 
             for idx, question_item in enumerate(data["questions"]):
+                row = QWidget()
+                row_lay = QHBoxLayout(row)
+                row_lay.setContentsMargins(0, 0, 0, 0)
                 cb = QCheckBox()
-                cb.setChecked(True)  # Default: all selected
+                cb.setChecked(True)
+                label = QLabel()
+                label.setWordWrap(True)
                 question = question_item.get("question", "")
                 type_info = question_item.get("type", "text")
-                cb.setText(f"{question} ({type_info})")
-                cb.setWordWrap(True)
-                self.selection_layout.addWidget(cb)
+                label.setText(f"{question} ({type_info})")
+                row_lay.addWidget(cb)
+                row_lay.addWidget(label, 1)
+                self.selection_layout.addWidget(row)
                 self._question_checkboxes.append(cb)
 
         self.selection_layout.addStretch()
