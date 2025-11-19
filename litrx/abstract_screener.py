@@ -809,13 +809,16 @@ class AbstractScreener:
                     if results and not results.get("missing_data", False):
                         callback_result = {
                             "initial": results.get("parsed_data", {}),
-                            "verification": results.get("verification", {})
+                            "verification": results.get("verification", {}),
+                            "index": index  # Add index for logging purposes
                         }
+                    else:
+                        callback_result = {"index": index}
 
-                    # Progress callback
+                    # Progress callback - use completed_count instead of index for accurate progress
                     if progress_callback:
                         try:
-                            progress_callback(index, total, callback_result)
+                            progress_callback(completed_count, total, callback_result)
                         except Exception as e:
                             logger.error(f"Progress callback failed: {e}", exc_info=True)
 
