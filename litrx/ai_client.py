@@ -12,6 +12,7 @@ from .config import DEFAULT_CONFIG as BASE_CONFIG, load_config as base_load_conf
 from .resources import resource_path
 from .i18n import t
 from .logging_config import get_logger
+from .security_utils import SecureLogger, safe_log_config, safe_log_error
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,9 @@ class AIClient:
         service = config.get("AI_SERVICE", "openai")
         model = config.get("MODEL_NAME", "gpt-4o")
 
+        # Log sanitized configuration for debugging
         logger.info(f"Initializing AIClient with service={service}, model={model}")
+        logger.debug(f"Configuration: {safe_log_config(config)}")
 
         if service == "openai":
             api_key = config.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -104,6 +107,10 @@ class AIClient:
                 has_rf = bool(sanitized.get("response_format"))
             except Exception:
                 has_rf = False
+
+            # Sanitize messages before logging to avoid leaking sensitive data
+            safe_message_preview = SecureLogger.sanitize_string(str(messages[0]["content"][:100]) if messages else "")
+
             logger.info(
                 "Dispatching AI request | model=%s, messages=%d, temperature=%s, response_format=%s",
                 self.model,
@@ -111,6 +118,7 @@ class AIClient:
                 sanitized.get("temperature", "<omitted>"),
                 sanitized.get("response_format") if has_rf else "<none>"
             )
+            logger.debug(f"First message preview (sanitized): {safe_message_preview}...")
 
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -142,11 +150,17 @@ class AIClient:
                     )
                     return response.model_dump()
                 except Exception as e2:
-                    logger.error(f"AI request failed after retry: {e2}", exc_info=True)
-                    raise RuntimeError(t("error_ai_request_failed", error=str(e2))) from e2
+                    # Sanitize error message to prevent API key leakage
+                    safe_error = safe_log_error(e2)
+                    logger.error(f"AI request failed after retry: {safe_error}", exc_info=True)
+                    sanitized_error_msg = SecureLogger.sanitize_error(e2)
+                    raise RuntimeError(t("error_ai_request_failed", error=sanitized_error_msg)) from e2
 
-            logger.error(f"AI request failed: {e}", exc_info=True)
-            raise RuntimeError(t("error_ai_request_failed", error=str(e))) from e
+            # Sanitize error message to prevent API key leakage
+            safe_error = safe_log_error(e)
+            logger.error(f"AI request failed: {safe_error}", exc_info=True)
+            sanitized_error_msg = SecureLogger.sanitize_error(e)
+            raise RuntimeError(t("error_ai_request_failed", error=sanitized_error_msg)) from e
 
     @staticmethod
     def _detect_temperature_support(model_name: str) -> bool:

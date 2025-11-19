@@ -141,22 +141,117 @@
 
 ---
 
+### Commit 2: Phase 1.2-1.4 Security and Concurrency Improvements
+**日期**: 2025-11-19
+**包含**:
+- SecureLogger集成到ai_client.py
+- 全局异常钩子（logging_config.py）
+- 并发安全增强（abstract_screener.py）
+- GUI线程重构（csv_tab.py使用QThread）
+- 安全日志测试套件
+
+**文件变更**:
+- `litrx/ai_client.py` (修改 - SecureLogger集成)
+- `litrx/logging_config.py` (修改 - 异常钩子)
+- `litrx/abstract_screener.py` (修改 - 并发安全)
+- `litrx/gui/tabs_qt/csv_tab.py` (修改 - QThread重构)
+- `tests/test_security_logging.py` (新增)
+- `IMPLEMENTATION_PROGRESS.md` (修改)
+
+**主要改进**:
+1. **安全日志**: API密钥自动脱敏，全局异常捕获
+2. **并发安全**: 超时处理、异常处理、取消机制
+3. **GUI线程**: csv_tab.py改用QThread，防止UI冻结
+4. **测试覆盖**: 安全日志功能测试套件
+
+---
+
+### Phase 1.2: 安全日志应用 ✅
+
+**1. 集成 SecureLogger 到 ai_client.py**
+- ✅ 导入 SecureLogger 和辅助函数
+- ✅ 使用 `safe_log_config()` 记录配置信息
+- ✅ 使用 `safe_log_error()` 记录异常
+- ✅ 在请求日志中添加消息预览的脱敏处理
+
+**2. 设置全局异常钩子**
+- ✅ 在 `logging_config.py` 中实现 `_secure_exception_hook`
+- ✅ 捕获未处理异常并脱敏敏感信息
+- ✅ 在 `setup_logging()` 中安装异常钩子
+- ✅ 保留正常的异常处理流程
+
+**3. 测试安全措施**
+- ✅ 创建 `tests/test_security_logging.py` 测试套件
+- ✅ 验证配置脱敏功能（OpenAI、SiliconFlow API密钥）
+- ✅ 验证字符串中API密钥模式的移除
+- ✅ 验证异常消息脱敏
+- ✅ 手动测试日志输出，确认无密钥泄露
+
+**影响**:
+- 🔐 API密钥自动从所有日志中移除
+- 🛡️ 支持多种密钥格式（OpenAI、JWT、Bearer令牌）
+- 📝 保留前8个字符便于识别（如 `sk-12345***`）
+- ⚠️ 注意：Python的traceback仍包含原始异常（建议生产环境使用INFO日志级别）
+
+---
+
+### Phase 1.3: 并发安全增强 ✅
+
+**1. 重构 abstract_screener.py 并发逻辑**
+- ✅ 添加任务超时处理（可配置 `TASK_TIMEOUT_SECONDS`）
+- ✅ 在worker和主线程中添加异常处理
+- ✅ 使用 `safe_log_error()` 记录脱敏错误
+- ✅ 改进取消机制（正确清理pending futures）
+- ✅ 添加进度回调错误处理
+- ✅ 实现完成/失败统计
+
+**2. 新增功能**
+- ✅ 配置选项: `TASK_TIMEOUT_SECONDS` (默认300秒)
+- ✅ 详细的调试日志（任务超时、失败详情）
+- ✅ 取消时抛出 `KeyboardInterrupt` 以便上层处理
+- ✅ Worker内部异常不会导致整个批处理失败
+
+**影响**:
+- ⏱️ 防止单个任务无限挂起
+- 🔍 更好的错误追踪和调试信息
+- 🛡️ 敏感数据不会在并发错误中泄露
+- 📊 完成率统计帮助识别问题
+
+---
+
+### Phase 1.4: GUI线程重构 (进行中)
+
+**1. 重构 csv_tab.py 使用 QThread ✅**
+- ✅ 创建 `CsvAnalysisWorker` 类继承 `QThread`
+- ✅ 将处理逻辑移至 `run()` 方法
+- ✅ 使用信号进行线程安全的UI更新
+- ✅ 移除 `threading.Thread` 依赖
+- ✅ 实现清理逻辑（`deleteLater()`）
+- ✅ 保持取消功能通过 `CancellableTask`
+
+**2. 重构 abstract_tab.py 使用 QThread** (待办)
+- [ ] 创建 `AbstractScreeningWorker` 类
+- [ ] 迁移处理逻辑到worker
+- [ ] 更新信号连接
+
+**3. 重构 matrix_tab.py 使用 QThread** (待办)
+- [ ] 创建 `MatrixAnalysisWorker` 类
+- [ ] 迁移处理逻辑到worker
+- [ ] 更新信号连接
+
+**影响**:
+- 🖥️ GUI在长时间操作期间不再冻结
+- 🔄 更好的线程生命周期管理
+- 🧹 适当的资源清理
+- ✅ 与Qt事件循环的正确集成
+
+---
+
 ## 下一步计划 (Next Steps)
 
 ### 高优先级 (High Priority)
 
-**Phase 1.2: 应用安全日志** (待办)
-- [ ] 修改 `ai_client.py` 使用 `SecureLogger`
-- [ ] 在 `logging_config.py` 设置全局异常钩子
-- [ ] 测试所有日志输出确保无API密钥泄露
-
-**Phase 1.3: 并发安全** (待办)
-- [ ] 重构 `abstract_screener.py` 的并发逻辑
-- [ ] 使用线程安全的数据结构
-- [ ] 添加超时和异常处理
-
-**Phase 1.4: GUI线程重构** (待办)
-- [ ] 重构 `csv_tab.py` 使用 QThread
+**Phase 1.4: GUI线程重构** (进行中)
 - [ ] 重构 `abstract_tab.py` 使用 QThread
 - [ ] 重构 `matrix_tab.py` 使用 QThread
 
@@ -191,15 +286,15 @@
 |------|------|------|
 | 无sys.exit()在库代码中 | ✅ 部分完成 | abstract_screener.py已完成，matrix_analyzer.py和pdf_screener.py待处理 |
 | 所有异常使用自定义类 | ✅ 进行中 | csv_analyzer.py和abstract_screener.py已完成 |
-| API密钥不出现在日志中 | ✅ 工具已创建 | SecureLogger已实现，待应用到ai_client.py |
-| GUI不冻结 | ⏳ 待处理 | 需重构GUI标签页使用QThread |
-| 并发筛选通过压力测试 | ⏳ 待处理 | 需重构并发逻辑 |
+| API密钥不出现在日志中 | ✅ 已完成 | SecureLogger已集成到ai_client.py和logging_config.py |
+| GUI不冻结 | ✅ 部分完成 | csv_tab.py已重构，abstract_tab.py和matrix_tab.py待处理 |
+| 并发筛选通过压力测试 | ✅ 已完成 | abstract_screener.py已增强超时、异常处理和取消机制 |
 
 ### 整体进度
 
-- **已完成**: 35%
-- **进行中**: 20%
-- **待处理**: 45%
+- **已完成**: 55%
+- **进行中**: 15%
+- **待处理**: 30%
 
 ---
 

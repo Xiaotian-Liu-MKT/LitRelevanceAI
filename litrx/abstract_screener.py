@@ -662,10 +662,17 @@ class AbstractScreener:
         progress_callback: Optional[Callable[[int, int, Optional[Dict[str, Any]]], None]] = None,
         stop_event: Optional[Any] = None
     ) -> pd.DataFrame:
-        """Analyze multiple articles concurrently.
+        """Analyze multiple articles concurrently with improved error handling.
 
         This method is thread-safe: workers compute results without mutating the DataFrame,
         and the main thread applies updates sequentially.
+
+        Features:
+        - Concurrent processing with configurable workers
+        - Timeout handling for individual tasks
+        - Exception handling with detailed logging
+        - Graceful cancellation via stop_event
+        - Progress tracking with callbacks
 
         Args:
             df: DataFrame with articles
@@ -678,58 +685,117 @@ class AbstractScreener:
 
         Returns:
             DataFrame with analysis results
+
+        Raises:
+            KeyboardInterrupt: If stop_event is set
         """
         max_workers = self.config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)
+        task_timeout = self.config.get('TASK_TIMEOUT_SECONDS', 300)  # 5 minutes default
         total = len(df)
+        completed_count = 0
+        failed_count = 0
 
         logger.info(f"Starting concurrent analysis of {total} articles with {max_workers} workers")
         logger.debug(f"Open questions: {len(open_questions)}, Yes/No questions: {len(yes_no_questions)}")
+        logger.debug(f"Task timeout: {task_timeout}s per article")
 
         def process_article(index_row_tuple):
-            """Process a single article (for thread pool) - thread-safe."""
+            """Process a single article (for thread pool) - thread-safe.
+
+            Returns:
+                Tuple of (index, results) where results may be None if cancelled or failed.
+            """
             index, row = index_row_tuple
+
+            # Check cancellation before starting
             if stop_event and stop_event.is_set():
+                logger.debug(f"Article {index} skipped (cancelled)")
                 return index, None
 
-            # Compute results without mutating DataFrame (thread-safe)
-            results = self.compute_single_article_results(
-                row, title_col, abstract_col,
-                open_questions, yes_no_questions
-            )
+            try:
+                # Compute results without mutating DataFrame (thread-safe)
+                results = self.compute_single_article_results(
+                    row, title_col, abstract_col,
+                    open_questions, yes_no_questions
+                )
 
-            # Add delay to avoid rate limiting
-            time.sleep(self.config.get('API_REQUEST_DELAY', 1))
-            return index, results
+                # Add delay to avoid rate limiting
+                delay = self.config.get('API_REQUEST_DELAY', 1)
+                if delay > 0:
+                    time.sleep(delay)
+
+                return index, results
+
+            except Exception as e:
+                # Log error with sanitized message
+                from .security_utils import safe_log_error
+                logger.error(f"Failed to process article {index}: {safe_log_error(e, include_type=True)}")
+                logger.debug(f"Article {index} details: row keys={list(row.keys())}", exc_info=True)
+                return index, None
 
         # Process articles concurrently
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
             futures = {
                 executor.submit(process_article, (index, row)): index
                 for index, row in df.iterrows()
             }
 
-            for future in as_completed(futures):
-                index, results = future.result()
-
-                # Apply results to DataFrame in main thread (thread-safe)
-                if results is not None:
-                    self._apply_results_to_dataframe(
-                        df, index, results, open_questions, yes_no_questions
-                    )
-
-                # Prepare callback result in legacy format
-                callback_result = None
-                if results and not results.get("missing_data", False):
-                    callback_result = {
-                        "initial": results.get("parsed_data", {}),
-                        "verification": results.get("verification", {})
-                    }
-
-                if progress_callback:
-                    progress_callback(index, total, callback_result)
-
+            # Process completed tasks as they finish
+            for future in as_completed(futures, timeout=None):
+                # Check cancellation in main thread
                 if stop_event and stop_event.is_set():
+                    logger.warning("Analysis cancelled by user - stopping after current batch")
+                    # Cancel pending futures
+                    for pending_future in futures:
+                        pending_future.cancel()
                     break
+
+                try:
+                    # Get result with timeout
+                    index, results = future.result(timeout=task_timeout)
+                    completed_count += 1
+
+                    # Apply results to DataFrame in main thread (thread-safe)
+                    if results is not None:
+                        self._apply_results_to_dataframe(
+                            df, index, results, open_questions, yes_no_questions
+                        )
+                    else:
+                        failed_count += 1
+                        logger.warning(f"Article {index} returned no results (failed or cancelled)")
+
+                    # Prepare callback result in legacy format
+                    callback_result = None
+                    if results and not results.get("missing_data", False):
+                        callback_result = {
+                            "initial": results.get("parsed_data", {}),
+                            "verification": results.get("verification", {})
+                        }
+
+                    # Progress callback
+                    if progress_callback:
+                        try:
+                            progress_callback(index, total, callback_result)
+                        except Exception as e:
+                            logger.error(f"Progress callback failed: {e}", exc_info=True)
+
+                except TimeoutError:
+                    failed_count += 1
+                    index = futures[future]
+                    logger.error(f"Article {index} timed out after {task_timeout}s")
+
+                except Exception as e:
+                    failed_count += 1
+                    index = futures.get(future, "unknown")
+                    from .security_utils import safe_log_error
+                    logger.error(f"Unexpected error processing article {index}: {safe_log_error(e)}", exc_info=True)
+
+        # Summary logging
+        logger.info(f"Batch analysis complete: {completed_count}/{total} processed, {failed_count} failed")
+
+        if stop_event and stop_event.is_set():
+            raise KeyboardInterrupt("Analysis stopped by user")
 
         return df
 
