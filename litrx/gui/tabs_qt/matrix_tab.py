@@ -1,4 +1,4 @@
-"""PyQt6-based literature matrix analysis tab."""
+"""PyQt6-based literature matrix analysis tab with user-friendly scheme management."""
 
 from __future__ import annotations
 
@@ -11,14 +11,17 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QComboBox,
 )
 
 import pandas as pd
@@ -31,6 +34,7 @@ from ...matrix_analyzer import (
 )
 from ...i18n import get_i18n, t
 from ...logging_config import get_logger
+from ...preset_manager import MatrixPresetManager
 from ..dialogs_qt.ai_matrix_assistant_qt import AIMatrixAssistantDialog
 from ..dialogs_qt.dimensions_editor_qt_v2 import DimensionsEditorDialog
 
@@ -126,7 +130,14 @@ class MatrixAnalysisWorker(QThread):
 
 
 class MatrixTab(QWidget):
-    """Tab for Literature Matrix Analysis."""
+    """Tab for Literature Matrix Analysis with user-friendly scheme management.
+
+    Simplified UI with 4 main controls:
+    1. Scheme selector (ComboBox)
+    2. Edit button
+    3. AI button
+    4. More menu (⋮)
+    """
 
     def __init__(self, parent: BaseWindow) -> None:
         super().__init__()
@@ -135,48 +146,57 @@ class MatrixTab(QWidget):
         # Worker thread and data
         self.worker: Optional[MatrixAnalysisWorker] = None
         self.matrix_config: Dict[str, Any] = {}
-        self.default_config_path = Path(__file__).resolve().parents[3] / "configs" / "matrix" / "default.yaml"
+        self.current_scheme_key: str = "default"
+
+        # Initialize preset manager
+        self.preset_manager = MatrixPresetManager()
 
         # Layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
 
-        # Configuration Section
-        config_group = QGroupBox(t("matrix_config"))
-        config_layout = QVBoxLayout()
+        # Scheme Management Section (Simplified)
+        scheme_group = QGroupBox(t("analysis_scheme"))
+        scheme_layout = QVBoxLayout()
 
-        self.dim_count_label = QLabel(t("current_dimensions", count=0))
-        config_layout.addWidget(self.dim_count_label)
+        # First row: scheme selector + buttons
+        control_layout = QHBoxLayout()
 
-        btn_layout = QHBoxLayout()
-        self.edit_dim_btn = QPushButton(f"✏️ {t('edit_dimensions')}")
-        self.edit_dim_btn.clicked.connect(self._open_dimensions_editor)
-        btn_layout.addWidget(self.edit_dim_btn)
+        # Scheme selector (ComboBox)
+        self.scheme_combo = QComboBox()
+        self.scheme_combo.setMinimumWidth(200)
+        self.scheme_combo.currentIndexChanged.connect(self._on_scheme_changed)
+        control_layout.addWidget(self.scheme_combo)
 
-        self.ai_dims_btn = QPushButton(f"🤖 {t('ai_generate_dims')}")
-        self.ai_dims_btn.clicked.connect(self._open_ai_dims)
-        btn_layout.addWidget(self.ai_dims_btn)
+        # Edit button
+        self.edit_btn = QPushButton(t("edit_dimensions"))
+        self.edit_btn.setToolTip("编辑当前方案的分析维度")
+        self.edit_btn.clicked.connect(self._open_dimensions_editor)
+        control_layout.addWidget(self.edit_btn)
 
-        self.import_config_btn = QPushButton(f"📥 {t('import_config')}")
-        self.import_config_btn.clicked.connect(self._import_config)
-        btn_layout.addWidget(self.import_config_btn)
+        # AI button
+        self.ai_btn = QPushButton(t("ai_generate_dims"))
+        self.ai_btn.setToolTip("使用AI生成分析维度")
+        self.ai_btn.clicked.connect(self._open_ai_dims)
+        control_layout.addWidget(self.ai_btn)
 
-        self.export_config_btn = QPushButton(f"📤 {t('export_config')}")
-        self.export_config_btn.clicked.connect(self._export_config)
-        btn_layout.addWidget(self.export_config_btn)
+        # More menu button (⋮)
+        self.more_btn = QPushButton(t("more_options"))
+        self.more_btn.setToolTip("更多选项")
+        self.more_btn.clicked.connect(self._show_more_menu)
+        control_layout.addWidget(self.more_btn)
 
-        self.save_preset_btn = QPushButton(f"💾 {t('save_preset')}")
-        self.save_preset_btn.clicked.connect(self._save_as_preset)
-        btn_layout.addWidget(self.save_preset_btn)
+        control_layout.addStretch()
+        scheme_layout.addLayout(control_layout)
 
-        self.reset_btn = QPushButton(f"🔄 {t('reset_default')}")
-        self.reset_btn.clicked.connect(self._reset_config)
-        btn_layout.addWidget(self.reset_btn)
+        # Second row: dimension count status
+        self.dim_count_label = QLabel("")
+        self.dim_count_label.setStyleSheet("color: #666;")
+        scheme_layout.addWidget(self.dim_count_label)
 
-        config_layout.addLayout(btn_layout)
-        config_group.setLayout(config_layout)
-        layout.addWidget(config_group)
+        scheme_group.setLayout(scheme_layout)
+        layout.addWidget(scheme_group)
 
         # Data Input Section
         input_group = QGroupBox(t("data_input"))
@@ -255,8 +275,9 @@ class MatrixTab(QWidget):
         self.log_text.setMaximumHeight(200)
         layout.addWidget(self.log_text)
 
-        # Load default config
-        self._load_default_config()
+        # Initialize: load schemes and default config
+        self._load_schemes()
+        self._load_scheme(self.current_scheme_key)
 
         # Register for language change notifications
         get_i18n().add_observer(self.update_language)
@@ -264,16 +285,12 @@ class MatrixTab(QWidget):
     def update_language(self) -> None:
         """Update UI text when language changes."""
         # Update dimension count label
-        dim_count = len(self.matrix_config.get("dimensions", []))
-        self.dim_count_label.setText(t("current_dimensions", count=dim_count))
+        self._update_dimension_count_label()
 
         # Update buttons
-        self.edit_dim_btn.setText(f"✏️ {t('edit_dimensions')}")
-        self.ai_dims_btn.setText(f"🤖 {t('ai_generate_dims')}")
-        self.import_config_btn.setText(f"📥 {t('import_config')}")
-        self.export_config_btn.setText(f"📤 {t('export_config')}")
-        self.save_preset_btn.setText(f"💾 {t('save_preset')}")
-        self.reset_btn.setText(f"🔄 {t('reset_default')}")
+        self.edit_btn.setText(t("edit_dimensions"))
+        self.ai_btn.setText(t("ai_generate_dims"))
+        self.more_btn.setText(t("more_options"))
 
         # Update labels
         self.folder_label.setText(t("pdf_folder_required"))
@@ -290,98 +307,382 @@ class MatrixTab(QWidget):
         # Update log label
         self.log_label.setText(t("processing_log"))
 
-    def _load_default_config(self) -> None:
-        """Load default matrix configuration."""
-        try:
-            self.matrix_config = load_matrix_config(str(self.default_config_path))
-            dim_count = len(self.matrix_config.get("dimensions", []))
-            self.dim_count_label.setText(t("current_dimensions", count=dim_count))
-        except Exception as e:
-            logger.warning(f"Failed to load default config: {e}")
+    def _load_schemes(self) -> None:
+        """Load all available schemes into the combo box."""
+        self.scheme_combo.clear()
 
-    def _import_config(self) -> None:
-        """Import matrix configuration from file."""
+        # Get list of schemes
+        schemes = self.preset_manager.list_presets()
+
+        # Add schemes to combo box
+        for scheme_key, display_name in schemes:
+            self.scheme_combo.addItem(display_name, scheme_key)
+
+        # Add separator and "New scheme" option
+        self.scheme_combo.insertSeparator(self.scheme_combo.count())
+        self.scheme_combo.addItem(t("new_scheme"), "__new__")
+
+        # Select current scheme
+        index = self.scheme_combo.findData(self.current_scheme_key)
+        if index >= 0:
+            self.scheme_combo.setCurrentIndex(index)
+
+        logger.info(f"Loaded {len(schemes)} schemes")
+
+    def _load_scheme(self, scheme_key: str) -> None:
+        """Load a scheme configuration.
+
+        Args:
+            scheme_key: Scheme file name (without extension)
+        """
+        try:
+            self.matrix_config = self.preset_manager.load_preset(scheme_key)
+            self.current_scheme_key = scheme_key
+            self._update_dimension_count_label()
+            logger.info(f"Loaded scheme: {scheme_key}")
+        except Exception as e:
+            logger.error(f"Failed to load scheme: {e}")
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _save_current_scheme(self, show_message: bool = False) -> None:
+        """Save current configuration to current scheme (auto-save).
+
+        Args:
+            show_message: Whether to show success message
+        """
+        if not self.current_scheme_key:
+            return
+
+        try:
+            # Get display name for this scheme
+            index = self.scheme_combo.findData(self.current_scheme_key)
+            display_name = self.scheme_combo.itemText(index) if index >= 0 else self.current_scheme_key
+
+            # Save scheme
+            self.preset_manager.save_preset(
+                self.current_scheme_key,
+                self.matrix_config,
+                display_name
+            )
+
+            if show_message:
+                # Show brief toast-style message in status bar
+                self._append_log(t("scheme_auto_saved"))
+
+            logger.info(f"Auto-saved scheme: {self.current_scheme_key}")
+
+        except Exception as e:
+            logger.error(f"Failed to save scheme: {e}")
+            if show_message:
+                QMessageBox.critical(self, t("error"), str(e))
+
+    def _update_dimension_count_label(self) -> None:
+        """Update the dimension count status label."""
+        dim_count = len(self.matrix_config.get("dimensions", []))
+        self.dim_count_label.setText(t("current_dimensions", count=dim_count))
+
+    def _on_scheme_changed(self, index: int) -> None:
+        """Handle scheme selection change.
+
+        Args:
+            index: Selected combo box index
+        """
+        scheme_key = self.scheme_combo.itemData(index)
+
+        # Handle "New scheme" option
+        if scheme_key == "__new__":
+            self._create_new_scheme()
+            # Reset combo box to previous selection
+            prev_index = self.scheme_combo.findData(self.current_scheme_key)
+            if prev_index >= 0:
+                self.scheme_combo.setCurrentIndex(prev_index)
+            return
+
+        # Load selected scheme
+        if scheme_key and scheme_key != self.current_scheme_key:
+            self._load_scheme(scheme_key)
+
+    def _create_new_scheme(self) -> None:
+        """Create a new scheme (dialog workflow)."""
+        # Ask for scheme name
+        name, ok = QInputDialog.getText(
+            self,
+            t("create_new_scheme"),
+            t("enter_scheme_name")
+        )
+
+        if not ok or not name.strip():
+            return
+
+        name = name.strip()
+
+        # Generate unique key from name
+        try:
+            scheme_key = self.preset_manager.generate_unique_key(name)
+
+            # Create empty scheme (copy from default)
+            default_config = self.preset_manager.load_preset("default")
+
+            # Save new scheme
+            self.preset_manager.save_preset(scheme_key, default_config, name)
+
+            # Reload schemes list
+            self._load_schemes()
+
+            # Select new scheme
+            index = self.scheme_combo.findData(scheme_key)
+            if index >= 0:
+                self.scheme_combo.setCurrentIndex(index)
+
+            QMessageBox.information(self, t("success"), t("scheme_saved"))
+
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _duplicate_current_scheme(self) -> None:
+        """Duplicate the current scheme."""
+        # Ask for new name
+        current_name = self.scheme_combo.currentText()
+        new_name, ok = QInputDialog.getText(
+            self,
+            t("duplicate_scheme"),
+            t("enter_scheme_name"),
+            text=f"{current_name} (副本)"
+        )
+
+        if not ok or not new_name.strip():
+            return
+
+        new_name = new_name.strip()
+
+        try:
+            # Generate unique key
+            new_key = self.preset_manager.generate_unique_key(new_name)
+
+            # Duplicate scheme
+            self.preset_manager.duplicate_preset(
+                self.current_scheme_key,
+                new_key,
+                new_name
+            )
+
+            # Reload schemes
+            self._load_schemes()
+
+            # Select new scheme
+            index = self.scheme_combo.findData(new_key)
+            if index >= 0:
+                self.scheme_combo.setCurrentIndex(index)
+
+            QMessageBox.information(self, t("success"), t("scheme_saved"))
+
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _rename_current_scheme(self) -> None:
+        """Rename the current scheme."""
+        if self.current_scheme_key == "default":
+            QMessageBox.warning(self, t("warning"), t("cannot_delete_default"))
+            return
+
+        # Ask for new name
+        current_name = self.scheme_combo.currentText()
+        new_name, ok = QInputDialog.getText(
+            self,
+            t("rename_scheme"),
+            t("enter_new_name"),
+            text=current_name
+        )
+
+        if not ok or not new_name.strip():
+            return
+
+        new_name = new_name.strip()
+
+        try:
+            # Generate new key
+            new_key = self.preset_manager.generate_unique_key(new_name)
+
+            # Rename scheme
+            self.preset_manager.rename_preset(
+                self.current_scheme_key,
+                new_key,
+                new_name
+            )
+
+            # Update current key
+            self.current_scheme_key = new_key
+
+            # Reload schemes
+            self._load_schemes()
+
+            QMessageBox.information(self, t("success"), t("scheme_saved"))
+
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _delete_current_scheme(self) -> None:
+        """Delete the current scheme."""
+        if self.current_scheme_key == "default":
+            QMessageBox.warning(self, t("warning"), t("cannot_delete_default"))
+            return
+
+        # Confirm deletion
+        current_name = self.scheme_combo.currentText()
+        reply = QMessageBox.question(
+            self,
+            t("confirm"),
+            t("confirm_delete_scheme", name=current_name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            # Delete scheme
+            self.preset_manager.delete_preset(self.current_scheme_key)
+
+            # Switch to default scheme
+            self.current_scheme_key = "default"
+            self._load_schemes()
+            self._load_scheme("default")
+
+            QMessageBox.information(self, t("success"), t("scheme_deleted"))
+
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _load_from_file(self) -> None:
+        """Import scheme from YAML file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            t("import_config"),
+            t("load_from_file"),
             "",
             "YAML (*.yaml *.yml)"
         )
-        if file_path:
-            try:
-                self.matrix_config = load_matrix_config(file_path)
-                dim_count = len(self.matrix_config.get("dimensions", []))
-                self.dim_count_label.setText(t("current_dimensions", count=dim_count))
-                QMessageBox.information(self, t("success"), t("saved"))
-            except Exception as e:
-                QMessageBox.critical(self, t("error"), str(e))
 
-    def _export_config(self) -> None:
-        """Export current matrix configuration."""
+        if not file_path:
+            return
+
+        try:
+            # Load config from file
+            with open(file_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+
+            # Update current config
+            self.matrix_config = config
+
+            # Auto-save to current scheme
+            self._save_current_scheme(show_message=True)
+
+            # Update UI
+            self._update_dimension_count_label()
+
+            QMessageBox.information(self, t("success"), t("scheme_loaded"))
+
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _save_to_file(self) -> None:
+        """Export current scheme to YAML file."""
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            t("export_config"),
+            t("save_to_file"),
             "",
             "YAML (*.yaml)"
         )
-        if file_path:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    yaml.safe_dump(self.matrix_config, f, allow_unicode=True)
-                QMessageBox.information(self, t("success"), t("saved"))
-            except Exception as e:
-                QMessageBox.critical(self, t("error"), str(e))
 
-    def _reset_config(self) -> None:
-        """Reset to default configuration."""
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(self.matrix_config, f, allow_unicode=True, sort_keys=False)
+
+            QMessageBox.information(self, t("success"), t("scheme_saved"))
+
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _restore_default_template(self) -> None:
+        """Restore default template configuration."""
         reply = QMessageBox.question(
             self,
             t("confirm"),
             t("reset_prompt_confirm"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._load_default_config()
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            # Load default config
+            default_config = self.preset_manager.load_preset("default")
+
+            # Update current config
+            self.matrix_config = default_config
+
+            # Auto-save to current scheme
+            self._save_current_scheme(show_message=True)
+
+            # Update UI
+            self._update_dimension_count_label()
+
+            QMessageBox.information(self, t("success"), t("scheme_loaded"))
+
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+
+    def _show_more_menu(self) -> None:
+        """Show the 'More' options menu."""
+        menu = QMenu(self)
+
+        # Add actions
+        menu.addAction(t("create_new_scheme"), self._create_new_scheme)
+        menu.addAction(t("duplicate_scheme"), self._duplicate_current_scheme)
+        menu.addAction(t("rename_scheme"), self._rename_current_scheme)
+        menu.addAction(t("delete_scheme"), self._delete_current_scheme)
+
+        menu.addSeparator()
+
+        menu.addAction(t("load_from_file"), self._load_from_file)
+        menu.addAction(t("save_to_file"), self._save_to_file)
+
+        menu.addSeparator()
+
+        menu.addAction(t("restore_default_template"), self._restore_default_template)
+
+        # Show menu at button position
+        menu.exec(self.more_btn.mapToGlobal(self.more_btn.rect().bottomLeft()))
 
     def _open_dimensions_editor(self) -> None:
         """Open graphical editor for current dimensions."""
         dlg = DimensionsEditorDialog(self, self.matrix_config or {"dimensions": []})
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             self.matrix_config = dlg.result
-            dim_count = len(self.matrix_config.get("dimensions", []))
-            self.dim_count_label.setText(t("current_dimensions", count=dim_count))
 
-    def _save_as_preset(self) -> None:
-        """Save current config as a preset YAML file."""
-        # Suggest default directory and filename under configs/matrix
-        from ...resources import resource_path
-        from datetime import datetime
-        default_dir = resource_path('configs', 'matrix')
-        suggested = str(default_dir / f"preset_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yaml")
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save as Preset",
-            suggested,
-            "YAML (*.yaml)"
-        )
-        if file_path:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    yaml.safe_dump(self.matrix_config or {"dimensions": []}, f, allow_unicode=True, sort_keys=False)
-                QMessageBox.information(self, t("success") or "Success", t("saved") or "Saved")
-            except Exception as e:
-                QMessageBox.critical(self, t("error") or "Error", str(e))
+            # Auto-save
+            self._save_current_scheme(show_message=True)
+
+            # Update UI
+            self._update_dimension_count_label()
 
     def _open_ai_dims(self) -> None:
         """Open AI assistant to generate dimensions and merge into current config."""
-        from PyQt6.QtWidgets import QDialog
         dlg = AIMatrixAssistantDialog(self, self.parent_window.build_config())
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
+            # Merge new dimensions
             dims = self.matrix_config.get('dimensions', []) or []
             dims.extend(dlg.result)
             self.matrix_config['dimensions'] = dims
-            dim_count = len(self.matrix_config.get("dimensions", []))
-            self.dim_count_label.setText(t("current_dimensions", count=dim_count))
+
+            # Auto-save
+            self._save_current_scheme(show_message=True)
+
+            # Update UI
+            self._update_dimension_count_label()
 
     def _browse_folder(self) -> None:
         """Browse for PDF folder."""
@@ -417,7 +718,7 @@ class MatrixTab(QWidget):
         output_file = self.output_entry.text().strip()
 
         if not pdf_folder or not output_file:
-            QMessageBox.critical(self, t("error"), t("error_fill_fields"))
+            QMessageBox.critical(self, t("error"), "请填写所有必填字段")
             return
 
         # Initialize UI
