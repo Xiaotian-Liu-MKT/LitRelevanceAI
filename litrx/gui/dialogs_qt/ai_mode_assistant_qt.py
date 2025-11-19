@@ -32,6 +32,9 @@ class AIModeAssistantDialog(QDialog):
 
         lay.addWidget(QLabel(t("describe_your_needs") or "Your description:"))
         self.input_text = QTextEdit()
+        # Enable input method support for Chinese and other languages
+        from PyQt6.QtCore import Qt
+        self.input_text.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         lay.addWidget(self.input_text)
 
         btns = QHBoxLayout()
@@ -78,6 +81,9 @@ class AIModeAssistantDialog(QDialog):
                 data = self._generator.generate_mode(desc, lang)
                 def ok():
                     if self._closed or not self.isVisible():
+                        # Re-enable button even if dialog was closed
+                        if not self._closed:
+                            self.gen_btn.setEnabled(True)
                         return
                     self.result = data
                     self.preview.setPlainText(json_pretty(data))
@@ -94,8 +100,10 @@ class AIModeAssistantDialog(QDialog):
                     # Provide helpful message for API key issues
                     if "API key" in error_msg or "not configured" in error_msg:
                         error_msg = f"{error_msg}\n\n请在主窗口配置 API 密钥。\nPlease configure API key in the main window."
-                    QMessageBox.critical(self, t("error") or "Error", error_msg)
+                    if self.isVisible():
+                        QMessageBox.critical(self, t("error") or "Error", error_msg)
                     self.gen_btn.setEnabled(True)
+                    self.apply_btn.setEnabled(False)
                 self._invoke(err)
 
         threading.Thread(target=worker, daemon=True).start()

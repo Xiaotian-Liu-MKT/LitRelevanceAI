@@ -31,12 +31,16 @@ class AIMatrixAssistantDialog(QDialog):
         lay.addWidget(QLabel(t("ai_dimension_guide") or "Describe what dimensions to extract."))
 
         lay.addWidget(QLabel(t("describe_your_needs") or "Your description:"))
-        self.input_text = QTextEdit(); lay.addWidget(self.input_text)
+        self.input_text = QTextEdit()
+        # Enable input method support for Chinese and other languages
+        from PyQt6.QtCore import Qt
+        self.input_text.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
+        lay.addWidget(self.input_text)
 
         btns = QHBoxLayout(); lay.addLayout(btns)
-        gen_btn = QPushButton(t("generate_dimensions") or "Generate")
-        gen_btn.clicked.connect(self._on_generate)
-        btns.addWidget(gen_btn)
+        self.gen_btn = QPushButton(t("generate_dimensions") or "Generate")
+        self.gen_btn.clicked.connect(self._on_generate)
+        btns.addWidget(self.gen_btn)
 
         self.apply_btn = QPushButton(t("apply_selected") or "Apply")
         self.apply_btn.setEnabled(False)
@@ -59,6 +63,8 @@ class AIMatrixAssistantDialog(QDialog):
         if not desc:
             QMessageBox.warning(self, t("warning") or "Warning", t("please_enter_description") or "Please enter a description")
             return
+        # Disable both buttons while generating
+        self.gen_btn.setEnabled(False)
         self.apply_btn.setEnabled(False)
         self.status.setText(t("generating") or "Generating...")
 
@@ -72,11 +78,15 @@ class AIMatrixAssistantDialog(QDialog):
                 dims = self._generator.generate_dimensions(desc, lang)
                 def ok():
                     if self._closed or not self.isVisible():
+                        # Re-enable button even if dialog was closed
+                        if not self._closed:
+                            self.gen_btn.setEnabled(True)
                         return
                     self.result = dims
                     self.preview.setPlainText(yaml_pretty({"dimensions": dims}))
                     self.status.setText(t("generation_success") or "Generation succeeded")
                     self.apply_btn.setEnabled(True)
+                    self.gen_btn.setEnabled(True)
                 self._invoke(ok)
             except Exception as e:
                 def err():
@@ -86,7 +96,11 @@ class AIMatrixAssistantDialog(QDialog):
                     error_msg = str(e)
                     if "API key" in error_msg or "not configured" in error_msg:
                         error_msg = f"{error_msg}\n\n请在主窗口配置 API 密钥。\nPlease configure API key in the main window."
-                    QMessageBox.critical(self, t("error") or "Error", error_msg)
+                    if self.isVisible():
+                        QMessageBox.critical(self, t("error") or "Error", error_msg)
+                    # Re-enable generate button, keep apply disabled
+                    self.gen_btn.setEnabled(True)
+                    self.apply_btn.setEnabled(False)
                 self._invoke(err)
 
         threading.Thread(target=worker, daemon=True).start()
