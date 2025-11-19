@@ -3,3 +3,11 @@ MODEL_NAME: gpt-4o
 OPENAI_API_KEY: ""
 SILICONFLOW_API_KEY: ""
 API_BASE: ""
+
+# Performance Optimization Settings
+MAX_WORKERS: 4  # Number of concurrent workers for parallel processing
+TASK_TIMEOUT_SECONDS: 600  # Timeout per task in seconds (10 minutes)
+ENABLE_CACHE: true  # Enable result caching to avoid redundant API calls
+CACHE_TTL_DAYS: 30  # Cache time-to-live in days
+ENABLE_PROGRESS_CHECKPOINTS: true  # Enable automatic progress checkpoints
+CHECKPOINT_INTERVAL: 5  # Save checkpoint every N items

@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -47,10 +48,12 @@ from .config import (
     load_env_file,
 )
 from .ai_client import AIClient
+from .cache import ResultCache
 from .constants import TITLE_SIMILARITY_THRESHOLD, FUZZY_MATCH_MIN_SCORE
 from .exceptions import FileProcessingError
 from .i18n import t
 from .logging_config import get_logger
+from .progress_manager import ProgressManager
 from .utils import AIResponseParser
 from .resources import resource_path
 from .token_tracker import TokenUsageTracker
@@ -79,6 +82,14 @@ DEFAULT_CONFIG: Dict[str, object] = {
 
     # API configuration
     "API_REQUEST_DELAY": 1,
+
+    # Performance optimization
+    "MAX_WORKERS": 4,  # Number of concurrent workers for parallel processing
+    "TASK_TIMEOUT_SECONDS": 600,  # Timeout per PDF (10 minutes default)
+    "ENABLE_CACHE": True,  # Enable result caching to avoid redundant API calls
+    "CACHE_TTL_DAYS": 30,  # Cache time-to-live in days
+    "ENABLE_PROGRESS_CHECKPOINTS": True,  # Enable automatic progress checkpoints
+    "CHECKPOINT_INTERVAL": 5,  # Save checkpoint every N PDFs
 }
 
 
@@ -129,9 +140,35 @@ def get_ai_response(
     prompt: str,
     client: AIClient,
     token_tracker: Optional[TokenUsageTracker] = None,
+    cache: Optional[ResultCache] = None,
 ) -> str:
-    """Convert a PDF to text, send with the prompt and return raw model text."""
+    """Convert a PDF to text, send with the prompt and return raw model text.
+
+    Args:
+        pdf_path: Path to PDF file
+        prompt: Analysis prompt
+        client: AI client
+        token_tracker: Optional token usage tracker
+        cache: Optional result cache
+
+    Returns:
+        AI response text
+    """
     pdf_text = extract_pdf_text(pdf_path)
+    pdf_filename = os.path.basename(pdf_path)
+
+    # Try to get cached result
+    if cache:
+        # Use first 1000 chars of PDF text as abstract for cache key
+        pdf_preview = pdf_text[:1000] if len(pdf_text) > 1000 else pdf_text
+        cached_result = cache.get(
+            title=pdf_filename,
+            abstract=pdf_preview,
+            questions=prompt[:500]  # Use first 500 chars of prompt
+        )
+        if cached_result:
+            logger.info(f"Cache hit for {pdf_filename}")
+            return cached_result.get("content", "")
 
     messages = [
         {
@@ -147,7 +184,21 @@ def get_ai_response(
         token_tracker.add_usage(response['token_usage'])
 
     try:
-        return response["choices"][0]["message"]["content"]
+        content = response["choices"][0]["message"]["content"]
+
+        # Cache the result
+        if cache:
+            pdf_preview = pdf_text[:1000] if len(pdf_text) > 1000 else pdf_text
+            cache.set(
+                title=pdf_filename,
+                abstract=pdf_preview,
+                questions=prompt[:500],
+                result={"content": content},
+                metadata={"pdf_path": pdf_path}
+            )
+            logger.debug(f"Cached result for {pdf_filename}")
+
+        return content
     except Exception:
         return ""
 
@@ -512,6 +563,65 @@ def parse_ai_response(
 
 
 # ---------------------------------------------------------------------------
+# Single PDF Processing (Thread-Safe)
+# ---------------------------------------------------------------------------
+
+def process_single_pdf(
+    pdf_path: str,
+    pdf_filename: str,
+    base_prompt: str,
+    dimensions: List[Dict[str, Any]],
+    client: AIClient,
+    token_tracker: Optional[TokenUsageTracker] = None,
+    cache: Optional[ResultCache] = None,
+    metadata_row: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Process a single PDF file (thread-safe).
+
+    Args:
+        pdf_path: Full path to PDF file
+        pdf_filename: PDF filename
+        base_prompt: Analysis prompt
+        dimensions: List of dimension configurations
+        client: AI client instance
+        token_tracker: Optional token usage tracker
+        cache: Optional result cache
+        metadata_row: Optional metadata dictionary for this PDF
+
+    Returns:
+        Dictionary containing analysis results for all dimensions
+    """
+    try:
+        # Get AI analysis (with caching support)
+        raw_response = get_ai_response(pdf_path, base_prompt, client, token_tracker, cache)
+        parsed = parse_ai_response(raw_response, dimensions)
+
+        # Build result row
+        row = {'PDF_File': pdf_filename}
+
+        # Add matched metadata if available
+        if metadata_row:
+            for key, value in metadata_row.items():
+                if key != 'PDF_File':  # Avoid duplicate
+                    row[key] = value
+
+        # Add dimension analysis results
+        for dim in dimensions:
+            key = dim['key']
+            col_name = dim.get('column_name', key)
+            row[col_name] = parsed.get(key, "缺失")
+
+        return row
+
+    except Exception as e:
+        logger.error(f"处理 {pdf_filename} 时出错: {e}")
+        return {
+            'PDF_File': pdf_filename,
+            'Error': str(e)
+        }
+
+
+# ---------------------------------------------------------------------------
 # Main Processing
 # ---------------------------------------------------------------------------
 
@@ -522,8 +632,9 @@ def process_literature_matrix(
     app_config: Dict[str, Any],
     progress_callback: Optional[Callable[[int, int], None]] = None,
     status_callback: Optional[Callable[[str, str], None]] = None,
+    stop_event: Optional[Any] = None,
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
-    """Main processing function for literature matrix analysis.
+    """Main processing function for literature matrix analysis with concurrent processing.
 
     Args:
         pdf_folder: Path to folder containing PDF files
@@ -532,6 +643,7 @@ def process_literature_matrix(
         app_config: Application configuration dict
         progress_callback: Optional callback(current, total) for progress updates
         status_callback: Optional callback(pdf_name, status) for status updates
+        stop_event: Optional threading.Event to stop processing
 
     Returns:
         Tuple of (results_df, mapping_df)
@@ -541,6 +653,13 @@ def process_literature_matrix(
     # Initialize AI client and token tracker
     client = AIClient(app_config)
     token_tracker = TokenUsageTracker()
+
+    # Initialize cache if enabled
+    cache = None
+    if app_config.get('ENABLE_CACHE', True):
+        cache_ttl = app_config.get('CACHE_TTL_DAYS', 30)
+        cache = ResultCache(ttl_days=cache_ttl)
+        logger.info(f"Result caching enabled (TTL: {cache_ttl} days)")
 
     # Get PDF files
     pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith('.pdf')]
@@ -552,6 +671,7 @@ def process_literature_matrix(
     # Load metadata if provided
     metadata_df = None
     mapping_df = None
+    metadata_dict = {}  # PDF filename -> metadata dict
     if metadata_path:
         try:
             if metadata_path.lower().endswith('.csv'):
@@ -563,6 +683,11 @@ def process_literature_matrix(
             matching_config = matrix_config.get('metadata_matching', {})
             mapping_df = build_pdf_metadata_mapping(pdf_files, metadata_df, matching_config)
 
+            # Create lookup dict for quick access
+            for _, row in mapping_df.iterrows():
+                pdf_name = row['PDF_File']
+                metadata_dict[pdf_name] = row.to_dict()
+
         except Exception as e:
             logger.error(f"元数据加载失败: {e}")
             metadata_df = None
@@ -571,67 +696,155 @@ def process_literature_matrix(
     dimensions = matrix_config.get('dimensions', [])
     base_prompt = construct_ai_prompt(dimensions)
 
-    # Process each PDF
-    results = []
-    for idx, pdf in enumerate(pdf_files):
+    # Initialize progress manager if enabled
+    progress_manager = None
+    start_index = 0
+    results_list = []
+
+    if app_config.get('ENABLE_PROGRESS_CHECKPOINTS', True):
+        # Create temporary output path for checkpoint
+        folder_name = os.path.basename(os.path.normpath(pdf_folder))
+        suffix = app_config.get('OUTPUT_FILE_SUFFIX', '_literature_matrix')
+        temp_output = os.path.join(pdf_folder, f"{folder_name}{suffix}_temp.csv")
+
+        progress_manager = ProgressManager(temp_output)
+
+        # Try to load checkpoint
+        checkpoint = progress_manager.load_checkpoint()
+        if checkpoint:
+            results_df_checkpoint = checkpoint.get('df')
+            start_index = checkpoint.get('last_index', -1) + 1
+            if results_df_checkpoint is not None and start_index > 0:
+                results_list = results_df_checkpoint.to_dict('records')
+                logger.info(f"从检查点恢复，已完成 {start_index}/{total_files} 个PDF")
+
+    # Configuration for concurrent processing
+    max_workers = app_config.get('MAX_WORKERS', 4)
+    task_timeout = app_config.get('TASK_TIMEOUT_SECONDS', 600)
+    checkpoint_interval = app_config.get('CHECKPOINT_INTERVAL', 5)
+
+    logger.info(f"开始并发处理 {total_files} 个PDF文件 (工作线程数: {max_workers})")
+
+    # Process PDFs concurrently
+    completed_count = start_index
+    failed_count = 0
+
+    def process_pdf_wrapper(pdf_info):
+        """Wrapper for processing a single PDF (for thread pool)."""
+        idx, pdf = pdf_info
+
+        # Check cancellation
+        if stop_event and stop_event.is_set():
+            logger.debug(f"PDF {pdf} 跳过 (已取消)")
+            return idx, None
+
         if status_callback:
             status_callback(pdf, "处理中")
 
         full_path = os.path.join(pdf_folder, pdf)
+        metadata_row = metadata_dict.get(pdf)
 
-        try:
-            # Get AI analysis
-            raw_response = get_ai_response(full_path, base_prompt, client, token_tracker)
-            parsed = parse_ai_response(raw_response, dimensions)
+        # Process PDF (thread-safe)
+        result = process_single_pdf(
+            full_path, pdf, base_prompt, dimensions,
+            client, token_tracker, cache, metadata_row
+        )
 
-            # Build result row
-            row = {'PDF_File': pdf}
+        # Add delay to avoid rate limiting
+        delay = app_config.get('API_REQUEST_DELAY', 1)
+        if delay > 0:
+            time.sleep(delay)
 
-            # Add matched metadata if available
-            if mapping_df is not None:
-                matched_row = mapping_df[mapping_df['PDF_File'] == pdf]
-                if not matched_row.empty:
-                    for col in metadata_df.columns:
-                        if col in matched_row.columns:
-                            row[col] = matched_row.iloc[0][col]
-                    row['Match_Status'] = matched_row.iloc[0]['Match_Status']
-                    row['Match_Confidence'] = matched_row.iloc[0]['Match_Confidence']
+        return idx, result
 
-            # Add dimension analysis results
-            for dim in dimensions:
-                key = dim['key']
-                col_name = dim.get('column_name', key)
-                row[col_name] = parsed.get(key, "缺失")
+    # Only process PDFs starting from start_index
+    pdfs_to_process = [(i, pdf) for i, pdf in enumerate(pdf_files) if i >= start_index]
 
-            results.append(row)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        futures = {
+            executor.submit(process_pdf_wrapper, pdf_info): pdf_info[1]
+            for pdf_info in pdfs_to_process
+        }
 
-            if status_callback:
-                status_callback(pdf, "完成")
+        # Process completed tasks as they finish
+        for future in as_completed(futures, timeout=None):
+            # Check cancellation
+            if stop_event and stop_event.is_set():
+                logger.warning("分析已被用户取消 - 在当前批次后停止")
+                for pending_future in futures:
+                    pending_future.cancel()
+                break
 
-        except Exception as e:
-            logger.error(f"处理 {pdf} 时出错: {e}")
-            row = {'PDF_File': pdf, 'Error': str(e)}
-            results.append(row)
+            try:
+                # Get result with timeout
+                idx, result = future.result(timeout=task_timeout)
+                completed_count += 1
 
-            if status_callback:
-                status_callback(pdf, f"错误: {str(e)}")
+                if result is not None:
+                    results_list.append(result)
 
-        if progress_callback:
-            progress_callback(idx + 1, total_files)
+                    # Status callback
+                    if status_callback:
+                        pdf_name = result.get('PDF_File', 'unknown')
+                        if 'Error' in result:
+                            status_callback(pdf_name, f"错误: {result['Error']}")
+                            failed_count += 1
+                        else:
+                            status_callback(pdf_name, "完成")
+                else:
+                    failed_count += 1
 
-        # API delay
-        time.sleep(app_config.get('API_REQUEST_DELAY', 1))
+                # Progress callback
+                if progress_callback:
+                    progress_callback(completed_count, total_files)
 
-    results_df = pd.DataFrame(results)
+                # Save checkpoint periodically
+                if progress_manager and (completed_count % checkpoint_interval == 0):
+                    checkpoint_df = pd.DataFrame(results_list)
+                    progress_manager.save_checkpoint(
+                        df=checkpoint_df,
+                        last_index=idx,
+                        metadata={'completed': completed_count, 'total': total_files}
+                    )
+                    logger.info(f"检查点已保存 (进度: {completed_count}/{total_files})")
+
+            except TimeoutError:
+                failed_count += 1
+                pdf_name = futures[future]
+                logger.error(f"PDF {pdf_name} 处理超时 (超过 {task_timeout}秒)")
+                if status_callback:
+                    status_callback(pdf_name, "超时")
+
+            except Exception as e:
+                failed_count += 1
+                pdf_name = futures.get(future, "unknown")
+                logger.error(f"处理PDF {pdf_name} 时发生意外错误: {e}", exc_info=True)
+                if status_callback:
+                    status_callback(pdf_name, f"错误: {str(e)}")
+
+    # Create final DataFrame
+    results_df = pd.DataFrame(results_list) if results_list else pd.DataFrame()
+
+    # Clean up checkpoint if processing completed successfully
+    if progress_manager and not (stop_event and stop_event.is_set()):
+        progress_manager.cleanup()
+        logger.info("处理完成，已清理检查点文件")
+
+    # Summary logging
+    logger.info(f"批量分析完成: {completed_count}/{total_files} 已处理, {failed_count} 失败")
 
     # Log token usage statistics
     token_summary = token_tracker.get_summary()
-    logger.info(f"\nToken usage statistics:")
-    logger.info(f"  API calls: {token_summary['call_count']}")
+    logger.info(f"\nToken 使用统计:")
+    logger.info(f"  API 调用次数: {token_summary['call_count']}")
     logger.info(f"  {token_summary['summary_text']}")
-    logger.info(f"  In millions: Input={token_summary['input_M']:.3f}M, Output={token_summary['output_M']:.3f}M, Total={token_summary['total_M']:.3f}M")
+    logger.info(f"  百万级统计: Input={token_summary['input_M']:.3f}M, Output={token_summary['output_M']:.3f}M, Total={token_summary['total_M']:.3f}M")
     if token_summary['call_count'] > 0:
-        logger.info(f"  Average tokens per call: {token_summary['avg_tokens_per_call']:.0f}")
+        logger.info(f"  平均每次调用: {token_summary['avg_tokens_per_call']:.0f} tokens")
+
+    if stop_event and stop_event.is_set():
+        raise KeyboardInterrupt("分析已被用户停止")
 
     return results_df, mapping_df
 
