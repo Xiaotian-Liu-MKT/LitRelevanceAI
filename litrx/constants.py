@@ -40,11 +40,13 @@ CHECKPOINT_TIMEOUT_READ = 10
 # ========================================
 # Threading & Concurrency
 # ========================================
-DEFAULT_MAX_WORKERS = 3
-"""Default number of concurrent worker threads for parallel processing."""
+DEFAULT_MAX_WORKERS = 5
+"""Default number of concurrent worker threads for parallel processing.
+Increased from 3 to 5 for better performance with modern AI APIs."""
 
 API_REQUEST_DELAY_SECONDS = 0.5
-"""Delay between API requests to avoid rate limiting."""
+"""Delay between API requests to avoid rate limiting.
+Can be reduced to 0 for APIs with high rate limits."""
 
 # ========================================
 # File Format
