@@ -7,9 +7,9 @@ import os
 import sys
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QTextEdit, QPlainTextEdit, QPushButton,
-    QHBoxLayout, QMessageBox
+    QHBoxLayout, QMessageBox, QGroupBox, QCheckBox, QScrollArea, QWidget, QSplitter
 )
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, Qt
 
 from ...ai_config_generator import MatrixDimensionGenerator
 from ...i18n import t
@@ -32,11 +32,14 @@ class AIMatrixAssistantDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("ai_matrix_assistant_title") or "AI Matrix Assistant")
         self.setModal(True)
-        self.resize(820, 600)
+        self.resize(900, 700)
         self._config = config
         self._generator: Optional[MatrixDimensionGenerator] = None
         self.result: Optional[List[Dict[str, Any]]] = None
         self._closed = False
+
+        # Track checkboxes for dimensions
+        self._dimension_checkboxes: List[QCheckBox] = []
 
         # Initialize worker signals
         self._signals = MatrixWorkerSignals()
@@ -48,14 +51,14 @@ class AIMatrixAssistantDialog(QDialog):
 
     def _build_ui(self) -> None:
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel(t("ai_dimension_guide") or "Describe what dimensions to extract."))
 
+        # Input section
+        lay.addWidget(QLabel(t("ai_dimension_guide") or "Describe what dimensions to extract."))
         lay.addWidget(QLabel(t("describe_your_needs") or "Your description:"))
-        # Prefer IME-friendly plain text editor (especially on macOS)
+
+        # IME-friendly input
         use_plain = (os.getenv("LITRX_USE_PLAIN_TEXT_INPUT") == "1") or (sys.platform == "darwin")
-        from PyQt6.QtCore import Qt
         self.input_text = IMEPlainTextEdit() if use_plain else QTextEdit()
-        # Enable input method support and avoid rich text parsing
         self.input_text.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         if isinstance(self.input_text, QTextEdit):
             try:
@@ -64,14 +67,16 @@ class AIMatrixAssistantDialog(QDialog):
             except Exception:
                 pass
         self.input_text.setPlaceholderText(t("describe_your_needs_placeholder") or "请在此输入中文描述…")
+        self.input_text.setMaximumHeight(100)
         lay.addWidget(self.input_text)
 
-        btns = QHBoxLayout(); lay.addLayout(btns)
+        # Buttons
+        btns = QHBoxLayout()
         self.gen_btn = QPushButton(t("generate_dimensions") or "Generate")
         self.gen_btn.clicked.connect(self._on_generate)
         btns.addWidget(self.gen_btn)
 
-        self.apply_btn = QPushButton(t("apply_selected") or "Apply")
+        self.apply_btn = QPushButton(t("apply_selected") or "Apply Selected")
         self.apply_btn.setEnabled(False)
         self.apply_btn.clicked.connect(self._on_apply)
         btns.addWidget(self.apply_btn)
@@ -79,13 +84,55 @@ class AIMatrixAssistantDialog(QDialog):
         cancel_btn = QPushButton(t("cancel") or "Cancel")
         cancel_btn.clicked.connect(self.reject)
         btns.addWidget(cancel_btn)
+        btns.addStretch()
+        lay.addLayout(btns)
 
+        # Status
         self.status = QLabel("")
         lay.addWidget(self.status)
 
-        lay.addWidget(QLabel(t("preview_label") or "Preview:"))
-        self.preview = QTextEdit(); self.preview.setReadOnly(True)
-        lay.addWidget(self.preview)
+        # Main content area with splitter
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Preview/Edit area
+        preview_group = QGroupBox(t("preview_edit") or "预览/编辑 Preview/Edit")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_layout.addWidget(QLabel(t("preview_hint") or "您可以在此编辑生成的 YAML / You can edit the generated YAML here:"))
+        self.preview = QTextEdit()
+        self.preview.setReadOnly(False)  # Allow manual editing
+        preview_layout.addWidget(self.preview)
+        splitter.addWidget(preview_group)
+
+        # Right: Selection area
+        selection_group = QGroupBox(t("select_dimensions") or "选择要采纳的维度 / Select Dimensions to Apply")
+        selection_layout = QVBoxLayout(selection_group)
+
+        # Add select/deselect all buttons
+        select_btns = QHBoxLayout()
+        select_all_btn = QPushButton(t("select_all") or "全选 / Select All")
+        select_all_btn.clicked.connect(self._select_all)
+        select_btns.addWidget(select_all_btn)
+
+        deselect_all_btn = QPushButton(t("deselect_all") or "全不选 / Deselect All")
+        deselect_all_btn.clicked.connect(self._deselect_all)
+        select_btns.addWidget(deselect_all_btn)
+        select_btns.addStretch()
+        selection_layout.addLayout(select_btns)
+
+        # Scrollable area for checkboxes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.selection_widget = QWidget()
+        self.selection_layout = QVBoxLayout(self.selection_widget)
+        self.selection_layout.addStretch()
+        scroll.setWidget(self.selection_widget)
+        selection_layout.addWidget(scroll)
+
+        splitter.addWidget(selection_group)
+
+        # Set initial splitter sizes (40% preview, 60% selection)
+        splitter.setSizes([400, 500])
+        lay.addWidget(splitter, stretch=1)
 
     def showEvent(self, event):  # noqa: N802
         try:
@@ -93,6 +140,87 @@ class AIMatrixAssistantDialog(QDialog):
         except Exception:
             pass
         return super().showEvent(event)
+
+    def _select_all(self) -> None:
+        """Select all dimension checkboxes."""
+        for cb in self._dimension_checkboxes:
+            cb.setChecked(True)
+
+    def _deselect_all(self) -> None:
+        """Deselect all dimension checkboxes."""
+        for cb in self._dimension_checkboxes:
+            cb.setChecked(False)
+
+    def _populate_selection_area(self, dims: List[Dict[str, Any]]) -> None:
+        """Populate the selection area with checkboxes for each dimension."""
+        # Clear existing checkboxes
+        for i in reversed(range(self.selection_layout.count())):
+            item = self.selection_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        self._dimension_checkboxes.clear()
+
+        # Add dimension checkboxes
+        if dims:
+            for idx, dim in enumerate(dims):
+                cb = QCheckBox()
+                cb.setChecked(True)  # Default: all selected
+
+                # Format display text
+                name = dim.get("name", dim.get("key", f"dimension_{idx}"))
+                display_name = dim.get("display_name", dim.get("column_name", name))
+                dim_type = dim.get("type", "unknown")
+
+                # Show key info about the dimension
+                text = f"<b>{display_name}</b> ({dim_type})"
+                question = dim.get("question", dim.get("prompt", ""))
+                if question:
+                    # Truncate long questions
+                    if len(question) > 100:
+                        question = question[:100] + "..."
+                    text += f"<br><i>{question}</i>"
+
+                label = QLabel(text)
+                label.setWordWrap(True)
+                label.setTextFormat(Qt.TextFormat.RichText)
+
+                # Create a container for checkbox + label
+                container = QWidget()
+                container_layout = QHBoxLayout(container)
+                container_layout.setContentsMargins(0, 5, 0, 5)
+                container_layout.addWidget(cb)
+                container_layout.addWidget(label, stretch=1)
+
+                self.selection_layout.addWidget(container)
+                self._dimension_checkboxes.append(cb)
+
+        self.selection_layout.addStretch()
+
+    def _get_selected_dimensions(self) -> Optional[List[Dict[str, Any]]]:
+        """Get only the selected dimensions from the current result."""
+        if not self.result:
+            return None
+
+        # Try to parse the preview text first (in case user edited it)
+        try:
+            import yaml
+            edited_data = yaml.safe_load(self.preview.toPlainText())
+            if isinstance(edited_data, dict) and "dimensions" in edited_data:
+                base_dims = edited_data["dimensions"]
+            else:
+                base_dims = self.result
+        except Exception:
+            # Fall back to original result
+            base_dims = self.result
+
+        # Filter based on checkbox selections
+        selected = []
+        for idx, cb in enumerate(self._dimension_checkboxes):
+            if cb.isChecked() and idx < len(base_dims):
+                selected.append(base_dims[idx])
+
+        return selected
 
     def _on_generate(self) -> None:
         desc = self.input_text.toPlainText().strip()
@@ -169,7 +297,11 @@ class AIMatrixAssistantDialog(QDialog):
                 preview_text = str(dims)
 
             self.preview.setPlainText(preview_text)
-            self.status.setText(t("generation_success") or "Generation succeeded")
+
+            # Populate selection area with checkboxes
+            self._populate_selection_area(dims)
+
+            self.status.setText(t("generation_success") or "Generation succeeded. Please review and select dimensions to apply.")
             self.apply_btn.setEnabled(True)
             self.gen_btn.setEnabled(True)
 
@@ -212,8 +344,27 @@ class AIMatrixAssistantDialog(QDialog):
     def _on_apply(self) -> None:
         if not self.result:
             logger.warning("Apply clicked but no result available")
+            QMessageBox.warning(
+                self,
+                t("warning") or "Warning",
+                t("no_result") or "没有可应用的结果 / No result to apply"
+            )
             return
-        logger.info("User clicked Apply, accepting dialog with %d dimensions", len(self.result))
+
+        # Get selected dimensions
+        selected = self._get_selected_dimensions()
+        if not selected:
+            logger.warning("Failed to get selected dimensions or none selected")
+            QMessageBox.warning(
+                self,
+                t("warning") or "Warning",
+                t("no_dimensions_selected") or "请至少选择一个维度 / Please select at least one dimension"
+            )
+            return
+
+        # Update result with selected dimensions only
+        self.result = selected
+        logger.info("User clicked Apply with %d dimensions selected", len(selected))
         self.accept()
 
     def reject(self) -> None:

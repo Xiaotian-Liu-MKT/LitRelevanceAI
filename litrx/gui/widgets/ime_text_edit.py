@@ -24,14 +24,15 @@ class IMEPlainTextEdit(QPlainTextEdit):
         self.setInputMethodHints(Qt.InputMethodHint.ImhMultiLine)
 
     def inputMethodEvent(self, event: QInputMethodEvent) -> None:  # noqa: N802
-        # If IME commits text, insert explicitly to avoid losing composition
-        commit = event.commitString()
-        if commit:
-            self.insertPlainText(commit)
-            event.accept()
-            return
-        # Fallback to default handling, which may render the preedit
+        """Handle input method events properly to avoid duplication.
+
+        Let Qt's default implementation handle both preedit (composition) and
+        commit strings. We just ensure proper attributes are set in __init__.
+        """
+        # Let parent class handle the event completely
+        # This avoids duplicate insertion of commit strings
         super().inputMethodEvent(event)
+        event.accept()
 
     def inputMethodQuery(self, query: Qt.InputMethodQuery) -> Any:  # noqa: N802
         if query == Qt.InputMethodQuery.ImCursorRectangle:

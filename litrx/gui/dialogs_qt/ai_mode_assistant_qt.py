@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import os
 import sys
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QTextEdit, QPlainTextEdit, QPushButton,
-    QHBoxLayout, QMessageBox
+    QHBoxLayout, QMessageBox, QGroupBox, QCheckBox, QScrollArea, QWidget, QSplitter
 )
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, Qt
 
 from ...ai_config_generator import AbstractModeGenerator
 from ...i18n import t
@@ -32,11 +32,15 @@ class AIModeAssistantDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("ai_mode_assistant_title") or "AI Mode Assistant")
         self.setModal(True)
-        self.resize(760, 560)
+        self.resize(900, 700)
         self._config = config
         self._generator: Optional[AbstractModeGenerator] = None
         self._closed = False
         self.result: Optional[Dict[str, Any]] = None
+
+        # Track checkboxes for criteria and questions
+        self._criteria_checkboxes: List[QCheckBox] = []
+        self._question_checkboxes: List[QCheckBox] = []
 
         # Initialize worker signals
         self._signals = WorkerSignals()
@@ -48,14 +52,14 @@ class AIModeAssistantDialog(QDialog):
 
     def _build_ui(self) -> None:
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel(t("ai_mode_guide") or "Describe your screening needs in natural language."))
 
+        # Input section
+        lay.addWidget(QLabel(t("ai_mode_guide") or "Describe your screening needs in natural language."))
         lay.addWidget(QLabel(t("describe_your_needs") or "Your description:"))
-        # Prefer IME-friendly plain text editor (especially on macOS)
+
+        # IME-friendly input
         use_plain = (os.getenv("LITRX_USE_PLAIN_TEXT_INPUT") == "1") or (sys.platform == "darwin")
-        from PyQt6.QtCore import Qt
         self.input_text = IMEPlainTextEdit() if use_plain else QTextEdit()
-        # Enable input method support and avoid rich text parsing
         self.input_text.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         if isinstance(self.input_text, QTextEdit):
             try:
@@ -64,14 +68,16 @@ class AIModeAssistantDialog(QDialog):
             except Exception:
                 pass
         self.input_text.setPlaceholderText(t("describe_your_needs_placeholder") or "请在此输入中文描述…")
+        self.input_text.setMaximumHeight(100)
         lay.addWidget(self.input_text)
 
+        # Buttons
         btns = QHBoxLayout()
         self.gen_btn = QPushButton(t("generate_config") or "Generate")
         self.gen_btn.clicked.connect(self._on_generate)
         btns.addWidget(self.gen_btn)
 
-        self.apply_btn = QPushButton(t("apply_changes") or "Apply")
+        self.apply_btn = QPushButton(t("apply_selected") or "Apply Selected")
         self.apply_btn.setEnabled(False)
         self.apply_btn.clicked.connect(self._on_apply)
         btns.addWidget(self.apply_btn)
@@ -79,17 +85,55 @@ class AIModeAssistantDialog(QDialog):
         cancel_btn = QPushButton(t("cancel") or "Cancel")
         cancel_btn.clicked.connect(self.reject)
         btns.addWidget(cancel_btn)
-
         btns.addStretch()
         lay.addLayout(btns)
 
+        # Status
         self.status = QLabel("")
         lay.addWidget(self.status)
 
-        lay.addWidget(QLabel(t("preview_label") or "Preview:"))
+        # Main content area with splitter
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Preview/Edit area
+        preview_group = QGroupBox(t("preview_edit") or "预览/编辑 Preview/Edit")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_layout.addWidget(QLabel(t("preview_hint") or "您可以在此编辑生成的 JSON / You can edit the generated JSON here:"))
         self.preview = QTextEdit()
-        self.preview.setReadOnly(True)
-        lay.addWidget(self.preview)
+        self.preview.setReadOnly(False)  # Allow manual editing
+        preview_layout.addWidget(self.preview)
+        splitter.addWidget(preview_group)
+
+        # Right: Selection area
+        selection_group = QGroupBox(t("select_items") or "选择要采纳的项 / Select Items to Apply")
+        selection_layout = QVBoxLayout(selection_group)
+
+        # Add select/deselect all buttons
+        select_btns = QHBoxLayout()
+        select_all_btn = QPushButton(t("select_all") or "全选 / Select All")
+        select_all_btn.clicked.connect(self._select_all)
+        select_btns.addWidget(select_all_btn)
+
+        deselect_all_btn = QPushButton(t("deselect_all") or "全不选 / Deselect All")
+        deselect_all_btn.clicked.connect(self._deselect_all)
+        select_btns.addWidget(deselect_all_btn)
+        select_btns.addStretch()
+        selection_layout.addLayout(select_btns)
+
+        # Scrollable area for checkboxes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.selection_widget = QWidget()
+        self.selection_layout = QVBoxLayout(self.selection_widget)
+        self.selection_layout.addStretch()
+        scroll.setWidget(self.selection_widget)
+        selection_layout.addWidget(scroll)
+
+        splitter.addWidget(selection_group)
+
+        # Set initial splitter sizes (40% preview, 60% selection)
+        splitter.setSizes([400, 500])
+        lay.addWidget(splitter, stretch=1)
 
     def showEvent(self, event):  # noqa: N802
         try:
@@ -97,6 +141,95 @@ class AIModeAssistantDialog(QDialog):
         except Exception:
             pass
         return super().showEvent(event)
+
+    def _select_all(self) -> None:
+        """Select all checkboxes."""
+        for cb in self._criteria_checkboxes + self._question_checkboxes:
+            cb.setChecked(True)
+
+    def _deselect_all(self) -> None:
+        """Deselect all checkboxes."""
+        for cb in self._criteria_checkboxes + self._question_checkboxes:
+            cb.setChecked(False)
+
+    def _populate_selection_area(self, data: Dict[str, Any]) -> None:
+        """Populate the selection area with checkboxes for each item."""
+        # Clear existing checkboxes
+        for i in reversed(range(self.selection_layout.count())):
+            item = self.selection_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        self._criteria_checkboxes.clear()
+        self._question_checkboxes.clear()
+
+        # Add criteria section
+        if "criteria" in data and data["criteria"]:
+            criteria_label = QLabel(f"<b>{t('criteria') or '筛选标准 / Criteria'}:</b>")
+            self.selection_layout.addWidget(criteria_label)
+
+            for idx, criterion in enumerate(data["criteria"]):
+                cb = QCheckBox()
+                cb.setChecked(True)  # Default: all selected
+                question = criterion.get("question", "")
+                type_info = criterion.get("type", "yes_no")
+                cb.setText(f"{question} ({type_info})")
+                cb.setWordWrap(True)
+                self.selection_layout.addWidget(cb)
+                self._criteria_checkboxes.append(cb)
+
+        # Add questions section
+        if "questions" in data and data["questions"]:
+            questions_label = QLabel(f"<b>{t('additional_questions') or '附加问题 / Additional Questions'}:</b>")
+            self.selection_layout.addWidget(questions_label)
+
+            for idx, question_item in enumerate(data["questions"]):
+                cb = QCheckBox()
+                cb.setChecked(True)  # Default: all selected
+                question = question_item.get("question", "")
+                type_info = question_item.get("type", "text")
+                cb.setText(f"{question} ({type_info})")
+                cb.setWordWrap(True)
+                self.selection_layout.addWidget(cb)
+                self._question_checkboxes.append(cb)
+
+        self.selection_layout.addStretch()
+
+    def _get_selected_items(self) -> Optional[Dict[str, Any]]:
+        """Get only the selected items from the current result."""
+        if not self.result:
+            return None
+
+        # Try to parse the preview text first (in case user edited it)
+        try:
+            import json
+            edited_data = json.loads(self.preview.toPlainText())
+            # Use edited data as base
+            base_data = edited_data
+        except Exception:
+            # Fall back to original result
+            base_data = self.result
+
+        # Filter based on checkbox selections
+        filtered = {
+            "mode_name": base_data.get("mode_name", ""),
+            "criteria": [],
+            "questions": []
+        }
+
+        # Add selected criteria
+        if "criteria" in base_data and base_data["criteria"]:
+            for idx, cb in enumerate(self._criteria_checkboxes):
+                if cb.isChecked() and idx < len(base_data["criteria"]):
+                    filtered["criteria"].append(base_data["criteria"][idx])
+
+        # Add selected questions
+        if "questions" in base_data and base_data["questions"]:
+            for idx, cb in enumerate(self._question_checkboxes):
+                if cb.isChecked() and idx < len(base_data["questions"]):
+                    filtered["questions"].append(base_data["questions"][idx])
+
+        return filtered
 
     def _on_generate(self) -> None:
         desc = self.input_text.toPlainText().strip()
@@ -172,7 +305,11 @@ class AIModeAssistantDialog(QDialog):
                 preview_text = str(data)
 
             self.preview.setPlainText(preview_text)
-            self.status.setText(t("generation_success") or "Generation succeeded")
+
+            # Populate selection area with checkboxes
+            self._populate_selection_area(data)
+
+            self.status.setText(t("generation_success") or "Generation succeeded. Please review and select items to apply.")
             self.apply_btn.setEnabled(True)
             self.gen_btn.setEnabled(True)
 
@@ -214,8 +351,37 @@ class AIModeAssistantDialog(QDialog):
     def _on_apply(self) -> None:
         if not self.result:
             logger.warning("Apply clicked but no result available")
+            QMessageBox.warning(
+                self,
+                t("warning") or "Warning",
+                t("no_result") or "没有可应用的结果 / No result to apply"
+            )
             return
-        logger.info("User clicked Apply, accepting dialog")
+
+        # Get selected items
+        selected = self._get_selected_items()
+        if not selected:
+            logger.warning("Failed to get selected items")
+            QMessageBox.warning(
+                self,
+                t("warning") or "Warning",
+                t("selection_error") or "获取选择项时出错 / Error getting selected items"
+            )
+            return
+
+        # Check if at least one item is selected
+        if not selected.get("criteria") and not selected.get("questions"):
+            QMessageBox.warning(
+                self,
+                t("warning") or "Warning",
+                t("no_items_selected") or "请至少选择一个项目 / Please select at least one item"
+            )
+            return
+
+        # Update result with selected items only
+        self.result = selected
+        logger.info("User clicked Apply with %d criteria and %d questions selected",
+                    len(selected.get("criteria", [])), len(selected.get("questions", [])))
         self.accept()
 
     def reject(self) -> None:
