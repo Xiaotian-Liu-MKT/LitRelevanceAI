@@ -72,10 +72,7 @@ class AbstractTab:
         self.mode_cb = ttk.Combobox(mode_frame, textvariable=self.mode_var, values=self.mode_options)
         self.mode_cb.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.add_mode_btn = ttk.Button(mode_frame, text=t("add_mode"), command=self.add_mode)
-        self.add_mode_btn.pack(side=tk.LEFT, padx=2)
-        # AI Assistant button
-        self.ai_assist_btn = ttk.Button(mode_frame, text=t("ai_assist_create_mode"), command=self.open_ai_assistant)
-        self.ai_assist_btn.pack(side=tk.LEFT, padx=2)
+        self.add_mode_btn.pack(side=tk.LEFT, padx=5)
 
         # Column selection (optional)
         self.col_selection_label = ttk.Label(left_panel, text=t("column_selection_optional"))
@@ -543,62 +540,6 @@ class AbstractTab:
         )
         editor.show()
 
-    def open_ai_assistant(self) -> None:
-        """Open AI assistant dialog for mode creation."""
-        from ...dialogs.ai_mode_assistant import AIModeAssistantDialog
-
-        # Build configuration
-        config = self.app.build_config()
-
-        # Open dialog
-        dialog = AIModeAssistantDialog(self.app.root, config)
-        self.app.root.wait_window(dialog.dialog)
-
-        # Handle result
-        if dialog.result:
-            self._save_generated_mode(dialog.result)
-
-    def _save_generated_mode(self, mode_config: dict) -> None:
-        """Save AI-generated mode to questions_config.json.
-
-        Args:
-            mode_config: Generated mode configuration dict
-        """
-        # Check if mode already exists
-        mode_key = mode_config["mode_key"]
-        if mode_key in self.modes_data:
-            if not messagebox.askyesno(
-                t("confirm"),
-                t("mode_overwrite_confirm", mode_key=mode_key)
-            ):
-                return
-
-        # Save to modes_data
-        self.modes_data[mode_key] = {
-            "description": mode_config["description"],
-            "yes_no_questions": mode_config["yes_no_questions"],
-            "open_questions": mode_config["open_questions"]
-        }
-
-        # Write to file
-        try:
-            with self.q_config_path.open("w", encoding="utf-8") as f:
-                json.dump(self.modes_data, f, ensure_ascii=False, indent=2)
-
-            # Refresh mode list
-            self.mode_cb.configure(values=list(self.modes_data.keys()))
-            self.mode_var.set(mode_key)
-
-            messagebox.showinfo(
-                t("success"),
-                t("mode_created_success", mode_key=mode_key)
-            )
-        except Exception as e:
-            messagebox.showerror(
-                t("error"),
-                f"{t('save_question_config_failed', error=str(e))}"
-            )
-
     def update_language(self) -> None:
         """Update all UI text when language changes."""
         # Update tab title
@@ -619,7 +560,6 @@ class AbstractTab:
         # Update buttons
         self.browse_btn.config(text=t("browse"))
         self.add_mode_btn.config(text=t("add_mode"))
-        self.ai_assist_btn.config(text=t("ai_assist_create_mode"))
         self.start_btn.config(text=t("start_screening"))
         self.stop_btn.config(text=t("stop_task"))
         self.edit_btn.config(text=t("edit_questions"))

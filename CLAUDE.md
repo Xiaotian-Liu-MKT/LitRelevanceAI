@@ -10,7 +10,6 @@ This document provides comprehensive guidance for AI assistants (like Claude Cod
 - **CSV Relevance Analysis**: Score Scopus exports (0-100) with AI-generated relevance explanations
 - **Abstract Screening**: Configurable yes/no criteria and open questions with optional verification workflow
 - **Literature Matrix Analysis**: Structured data extraction with 7 question types (text, yes_no, single_choice, multiple_choice, number, rating, list)
-- **AI-Assisted Configuration Generation** (NEW): Natural language-based automatic generation of screening modes and matrix dimensions using AI
 - **PDF Screening**: Legacy full-text analysis (superseded by matrix analyzer)
 - **Bilingual GUI**: Tkinter interface with Chinese/English support
 
@@ -27,36 +26,27 @@ This document provides comprehensive guidance for AI assistants (like Claude Cod
 
 ```
 LitRelevanceAI/
-├── litrx/                          # Main package (~5000 LOC)
+├── litrx/                          # Main package (~4000 LOC)
 │   ├── __init__.py                 # Package initialization
 │   ├── __main__.py                 # Entry point: python -m litrx
 │   ├── cli.py                      # CLI dispatcher (csv/abstract/matrix commands)
 │   ├── config.py                   # Cascading configuration management
 │   ├── ai_client.py                # OpenAI SDK wrapper for AI providers
-│   ├── ai_config_generator.py      # AI-assisted config generation (NEW)
 │   ├── i18n.py                     # Internationalization (Observer pattern)
 │   ├── csv_analyzer.py             # CSV relevance scoring (LiteratureAnalyzer)
 │   ├── abstract_screener.py        # Title/abstract screening with verification
 │   ├── pdf_screener.py             # PDF analysis (LEGACY - use matrix_analyzer)
-│   ├── matrix_analyzer.py          # Literature matrix analysis
-│   ├── prompts/                    # AI prompt templates (NEW)
-│   │   ├── abstract_mode_generation.txt
-│   │   └── matrix_dimension_generation.txt
+│   ├── matrix_analyzer.py          # Literature matrix analysis (NEW)
 │   └── gui/                        # Tkinter GUI components
 │       ├── base_window.py          # BaseWindow class with shared controls
 │       ├── main_window.py          # LitRxApp - main application window
 │       ├── tabs/                   # Feature tabs
 │       │   ├── csv_tab.py          # CSV analysis tab
-│       │   ├── abstract/           # Abstract screening components
-│       │   │   ├── abstract_tab.py # Abstract screening tab
-│       │   │   ├── question_editor.py
-│       │   │   └── statistics_viewer.py
-│       │   ├── matrix_tab.py       # Literature matrix tab
+│       │   ├── abstract_tab.py     # Abstract screening tab
+│       │   ├── matrix_tab.py       # Literature matrix tab (NEW)
 │       │   └── pdf_tab.py          # PDF screening tab (LEGACY)
 │       └── dialogs/
-│           ├── dimension_editor.py # Matrix dimension configuration
-│           ├── ai_mode_assistant.py # AI mode generation dialog (NEW)
-│           └── ai_dimension_assistant.py # AI dimension generation dialog (NEW)
+│           └── dimension_editor.py # Matrix dimension configuration
 ├── configs/                        # Configuration files
 │   ├── config.yaml                 # Default AI service settings
 │   ├── questions/                  # Question templates per module
@@ -67,12 +57,9 @@ LitRelevanceAI/
 │       └── default.yaml            # Matrix dimensions config
 ├── docs/                           # Documentation
 │   ├── ARCHITECTURE.md             # Detailed architecture
-│   ├── AI_ASSISTED_CONFIG_DESIGN.md # AI config feature design (NEW)
-│   ├── AI_ASSISTED_CONFIG_IMPLEMENTATION_PLAN.md # Implementation plan (NEW)
 │   └── 项目功能与架构概览.md        # Chinese overview
-├── tests/                          # Unit tests
-│   ├── test_abstract_verification.py
-│   └── test_ai_config_generator.py # AI config generator tests (NEW)
+├── tests/                          # Unit tests (minimal coverage)
+│   └── test_abstract_verification.py
 ├── run_gui.py                      # GUI launcher with auto-install
 ├── questions_config.json           # Abstract screening modes
 ├── prompts_config.json             # AI prompt templates (GUI-editable)
@@ -202,190 +189,6 @@ Configuration priority (low to high):
 - `load_env_file(path)`: Parse .env files
 - `load_config(path, defaults)`: Merge YAML/JSON with defaults
 - Configuration keys: `AI_SERVICE`, `MODEL_NAME`, `{OPENAI|SILICONFLOW}_API_KEY`, `API_BASE`, `LANGUAGE`, `ENABLE_VERIFICATION`
-
-## AI-Assisted Configuration Generation (NEW Feature)
-
-### Overview
-
-The AI-assisted configuration generation feature allows users to create screening modes and matrix dimensions using natural language descriptions instead of manually writing JSON/YAML configurations. This significantly lowers the barrier to entry for non-technical users.
-
-### Key Components
-
-#### 1. `ai_config_generator.py` - Core Module
-
-**Classes**:
-- `AbstractModeGenerator`: Generates abstract screening modes from natural language
-- `MatrixDimensionGenerator`: Generates matrix dimensions from natural language
-
-**Usage Example**:
-```python
-from litrx.ai_config_generator import AbstractModeGenerator
-
-config = {"AI_SERVICE": "openai", "OPENAI_API_KEY": "sk-..."}
-generator = AbstractModeGenerator(config)
-
-# User describes their needs in natural language
-description = "我需要筛选实证研究，判断是否使用问卷法，并提取样本量"
-
-# AI generates the configuration
-mode_config = generator.generate_mode(description, language="zh")
-
-# Result:
-# {
-#   "mode_key": "empirical_survey_screening",
-#   "description": "实证研究问卷调查筛选",
-#   "yes_no_questions": [...],
-#   "open_questions": [...]
-# }
-```
-
-#### 2. Prompt Templates
-
-**Location**: `litrx/prompts/`
-
-- `abstract_mode_generation.txt`: Template for generating abstract screening modes
-- `matrix_dimension_generation.txt`: Template for generating matrix dimensions
-
-**Customization**: Users can customize these templates by editing the `.txt` files. If the files don't exist, the system falls back to embedded default templates.
-
-#### 3. GUI Dialogs
-
-**AI Mode Assistant** (`litrx/gui/dialogs/ai_mode_assistant.py`):
-- Natural language input for describing screening needs
-- Real-time AI generation with progress indicator
-- Preview of generated configuration
-- Ability to regenerate if unsatisfied
-- Direct integration with `questions_config.json`
-
-**AI Dimension Assistant** (`litrx/gui/dialogs/ai_dimension_assistant.py`):
-- Natural language input for describing extraction needs
-- Multi-dimension generation in one request
-- Table view with checkboxes for selective application
-- Supports all 7 dimension types (text, yes_no, single_choice, multiple_choice, number, rating, list)
-
-### User Workflow
-
-#### Creating a Screening Mode with AI
-
-1. User clicks "🤖 AI 辅助创建" button in Abstract Screening tab
-2. Dialog opens with guidance text and examples
-3. User enters natural language description (e.g., "筛选心理学实证研究，需要判断是否使用实验方法...")
-4. User clicks "生成配置"
-5. AI processes the description (typically 5-10 seconds)
-6. Preview shows generated questions categorized as yes/no and open questions
-7. User can regenerate or apply the configuration
-8. Configuration is saved to `questions_config.json` and immediately available
-
-#### Creating Matrix Dimensions with AI
-
-1. User opens "编辑维度" dialog in Matrix tab
-2. Clicks "🤖 AI 辅助创建"
-3. Enters description of information to extract
-4. AI generates multiple dimensions with appropriate types
-5. User reviews in table format and selects desired dimensions
-6. Selected dimensions are added to the configuration
-7. User can continue manual editing if needed
-
-### Implementation Details
-
-#### AI Response Parsing
-
-**Challenge**: AI responses may include markdown code blocks, explanations, or formatting.
-
-**Solution**: Robust parsing that handles multiple formats:
-```python
-def _parse_json_response(self, response: str) -> Dict:
-    # Try to extract from ```json code block
-    if "```json" in response:
-        json_part = response.split("```json")[1].split("```")[0]
-    elif "```" in response:
-        json_part = response.split("```")[1].split("```")[0]
-    else:
-        json_part = response
-
-    return json.loads(json_part.strip())
-```
-
-#### Configuration Validation
-
-**Abstract Modes**:
-- Required fields: `mode_key`, `description`, `yes_no_questions`, `open_questions`
-- `mode_key` must be valid snake_case identifier
-- Each question must have `key`, `question`, `column_name`
-- Warns if total questions > 15 (usability concern)
-
-**Matrix Dimensions**:
-- Required fields: `type`, `key`, `question`, `column_name`
-- Type must be one of 7 supported types
-- Type-specific validation:
-  - `single_choice`/`multiple_choice`: Must have `options` (list, ≥2 items)
-  - `rating`: Must have `scale` (integer, 2-10)
-  - `list`: Must have `separator`
-  - `number`: Optional `unit`
-
-#### Error Handling
-
-- **Invalid AI Response**: User-friendly error message with suggestion to try again
-- **Network Failure**: Clear indication of network issues
-- **Validation Errors**: Specific messages about what's wrong with the configuration
-- **Fallback**: Users can always use manual editing if AI generation fails
-
-### Testing
-
-**Unit Tests**: `tests/test_ai_config_generator.py`
-
-**Key Test Cases**:
-- Basic generation with mocked AI responses
-- Markdown code block parsing
-- Validation of various error conditions
-- All dimension types and their specific requirements
-- Template file loading vs. default template fallback
-
-**Running Tests**:
-```bash
-pytest tests/test_ai_config_generator.py -v
-```
-
-### Best Practices for AI Assistants
-
-When working on or extending this feature:
-
-1. **Always Mock AIClient in Tests**: Never make real API calls in tests
-   ```python
-   @pytest.fixture
-   def mock_ai_client(mocker):
-       mock = mocker.MagicMock()
-       mocker.patch("litrx.ai_config_generator.AIClient", return_value=mock)
-       return mock
-   ```
-
-2. **Preserve Prompt Template Format**: When modifying templates:
-   - Keep `{user_description}` and `{language}` placeholders
-   - Maintain clear examples in both Chinese and English
-   - Test with actual AI to verify output quality
-
-3. **Handle Edge Cases**: Consider:
-   - Empty user input
-   - Very long descriptions
-   - Non-English/non-Chinese input
-   - Ambiguous requirements
-
-4. **Maintain Backward Compatibility**: Generated configurations must work with existing `abstract_screener.py` and `matrix_analyzer.py`
-
-5. **Internationalization**: All UI text must use `t()` function:
-   ```python
-   self.label.config(text=t("ai_mode_assistant_title"))
-   ```
-
-### Future Enhancements
-
-Potential improvements (not yet implemented):
-
-- **Multi-turn Dialogue**: AI asks clarifying questions if description is ambiguous
-- **Configuration Templates**: Pre-built templates for common research fields
-- **History Tracking**: Save and reuse previous successful generations
-- **Batch Generation**: Generate multiple related configurations at once
-- **Smart Suggestions**: Recommend additional questions based on existing ones
 
 ## Common Development Workflows
 
