@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import os
+import threading
 from typing import TYPE_CHECKING, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
@@ -65,7 +66,7 @@ class AbstractScreeningWorker(QThread):
     enable_export = pyqtSignal()
     finished_processing = pyqtSignal()  # Emitted when done (success or cancelled)
 
-    def __init__(self, config: dict, file_path: str, mode: str, verify_enabled: bool):
+    def __init__(self, config: dict, file_path: str, mode: str, verify_enabled: bool, max_workers: int = 3):
         """Initialize the worker.
 
         Args:
@@ -73,21 +74,23 @@ class AbstractScreeningWorker(QThread):
             file_path: Path to input file (CSV or Excel)
             mode: Screening mode name
             verify_enabled: Whether verification is enabled
+            max_workers: Number of concurrent worker threads
         """
         super().__init__()
         self.config = config
         self.file_path = file_path
         self.mode = mode
         self.verify_enabled = verify_enabled
-        self.stop_flag = False
+        self.max_workers = max_workers
+        self.stop_event = threading.Event()
         self.df: Optional[pd.DataFrame] = None
 
     def stop(self) -> None:
         """Request the worker to stop processing."""
-        self.stop_flag = True
+        self.stop_event.set()
 
     def run(self) -> None:
-        """Run the screening process (executed in background thread)."""
+        """Run the screening process with concurrent processing (executed in background thread)."""
         try:
             # Load questions for selected mode
             q = load_mode_questions(self.mode)
@@ -98,61 +101,74 @@ class AbstractScreeningWorker(QThread):
             df, title_col, abstract_col = load_and_validate_data(self.file_path, self.config)
             df = prepare_dataframe(df, open_q, yes_no_q)
 
-            self.df = df
             total = len(df)
+            self.update_status.emit(f"Processing {total} articles with {self.max_workers} concurrent workers...")
+            self.append_log.emit(f"Starting concurrent analysis: {total} articles, {self.max_workers} workers")
+            self.append_log.emit(f"Verification: {'Enabled' if self.verify_enabled else 'Disabled'}")
 
-            # Create screener
+            # Create screener with updated config
             self.config["ENABLE_VERIFICATION"] = self.verify_enabled
+            self.config["MAX_WORKERS"] = self.max_workers
             screener = AbstractScreener(self.config)
 
-            # Process each row
-            for i, (idx, row) in enumerate(df.iterrows(), start=1):
-                if self.stop_flag:
-                    self.show_info.emit(t("hint"), t("task_stopped"))
-                    break
+            # Define progress callback that emits signals
+            def progress_callback(index: int, total: int, result: Optional[dict]) -> None:
+                """Called by screener for each completed article."""
+                # Check if cancelled
+                if self.stop_event.is_set():
+                    return
 
-                try:
-                    title = str(row.get('Title', ''))
-                    self.update_status.emit(f"Processing {i}/{total}: {title[:50]}...")
-                    self.append_log.emit(f"[{i}/{total}] {title[:50]}...")
+                # Get title for logging
+                title = str(df.iloc[index].get(title_col, '')) if index < len(df) else ''
 
-                    # Compute results (thread-safe; does not mutate df)
-                    results = screener.compute_single_article_results(
-                        row, title_col, abstract_col, open_q, yes_no_q
-                    )
+                # Update UI
+                self.update_progress.emit((index + 1) / total * 100)
+                self.update_status.emit(f"Completed {index + 1}/{total}: {title[:50]}...")
+                self.append_log.emit(f"✓ [{index + 1}/{total}] {title[:50]}...")
 
-                    # Apply to DataFrame
-                    for col_name, value in results.get("columns", {}).items():
-                        df.at[idx, col_name] = value
+                # Add result row to table
+                status = "Completed" if result else "Skipped"
+                summary = "Analyzed" if result else "N/A"
+                self.add_result_row.emit(index, title[:100], status, summary)
 
-                    # Update table UI
-                    self.add_result_row.emit(i - 1, title, "Completed", "Analyzed")
+            # Process batch concurrently
+            try:
+                df = screener.analyze_batch_concurrent(
+                    df, title_col, abstract_col, open_q, yes_no_q,
+                    progress_callback=progress_callback,
+                    stop_event=self.stop_event
+                )
+                self.df = df
+            except KeyboardInterrupt:
+                # User cancelled
+                self.show_info.emit(t("hint"), t("task_stopped"))
+                self.df = df  # Save partial results
+                return
 
-                except Exception as e:
-                    self.append_log.emit(f"Error: {str(e)}")
-                    self.add_result_row.emit(i - 1, title, "Error", str(e))
+            # Check if cancelled
+            if self.stop_event.is_set():
+                self.show_info.emit(t("hint"), t("task_stopped"))
+                return
 
-                # Update progress
-                self.update_progress.emit(i / total * 100)
+            # Auto-save results beside the input file using configured suffix
+            try:
+                base, ext = os.path.splitext(self.file_path)
+                suffix = self.config.get("OUTPUT_FILE_SUFFIX", "_analyzed")
+                output_file_path = f"{base}{suffix}{ext}"
+                if ext.lower() == ".csv":
+                    df.to_csv(output_file_path, index=False, encoding="utf-8-sig")
+                else:
+                    df.to_excel(output_file_path, index=False)
+                self.show_info.emit(t("success"), t("complete_saved", path=output_file_path))
+            except Exception as e:
+                self.show_error.emit(t("error"), str(e))
 
-            if not self.stop_flag:
-                # Auto-save results beside the input file using configured suffix
-                try:
-                    base, ext = os.path.splitext(self.file_path)
-                    suffix = self.config.get("OUTPUT_FILE_SUFFIX", "_analyzed")
-                    output_file_path = f"{base}{suffix}{ext}"
-                    if ext.lower() == ".csv":
-                        df.to_csv(output_file_path, index=False, encoding="utf-8-sig")
-                    else:
-                        df.to_excel(output_file_path, index=False)
-                    self.show_info.emit(t("success"), t("complete_saved", path=output_file_path))
-                except Exception as e:
-                    self.show_error.emit(t("error"), str(e))
-
-                self.enable_export.emit()
+            self.enable_export.emit()
 
         except Exception as e:
-            self.show_error.emit(t("error"), str(e))
+            import traceback
+            error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
+            self.show_error.emit(t("error"), error_msg)
 
         finally:
             self.finished_processing.emit()
@@ -223,21 +239,67 @@ class AbstractTab(QWidget):
         options_group = QGroupBox(t("processing_options"))
         options_layout = QVBoxLayout()
 
+        # Verification checkbox with hint
+        verify_layout = QVBoxLayout()
         self.verify_checkbox = QCheckBox(t("enable_verification"))
         self.verify_checkbox.setChecked(True)
-        options_layout.addWidget(self.verify_checkbox)
+        self.verify_checkbox.setToolTip(t("verification_tooltip") or
+            "Enable AI verification of answers (doubles processing time but improves accuracy)")
+        verify_layout.addWidget(self.verify_checkbox)
 
+        verify_hint = QLabel("💡 " + (t("verification_hint") or
+            "Tip: Disable verification for faster initial screening"))
+        verify_hint.setStyleSheet("color: #666; font-size: 11px;")
+        verify_hint.setWordWrap(True)
+        verify_layout.addWidget(verify_hint)
+        options_layout.addLayout(verify_layout)
+
+        # Workers spinbox with hint
         workers_layout = QHBoxLayout()
         self.workers_label = QLabel(t("concurrent_workers"))
         workers_layout.addWidget(self.workers_label)
 
         self.workers_spinbox = QSpinBox()
-        self.workers_spinbox.setRange(1, 10)
-        self.workers_spinbox.setValue(3)
+        self.workers_spinbox.setRange(1, 20)
+        self.workers_spinbox.setValue(5)  # Increased default from 3 to 5 for better performance
+        self.workers_spinbox.setToolTip(t("workers_tooltip") or
+            "Number of concurrent threads (3-10 recommended, higher for faster APIs)")
         workers_layout.addWidget(self.workers_spinbox)
+
+        workers_hint = QLabel("(1-20, ↑ = faster)")
+        workers_hint.setStyleSheet("color: #666; font-size: 11px;")
+        workers_layout.addWidget(workers_hint)
         workers_layout.addStretch()
 
         options_layout.addLayout(workers_layout)
+
+        # API delay spinbox with hint
+        delay_layout = QHBoxLayout()
+        self.delay_label = QLabel(t("api_delay_label") or "API Delay (s):")
+        delay_layout.addWidget(self.delay_label)
+
+        self.delay_spinbox = QSpinBox()
+        self.delay_spinbox.setRange(0, 5)
+        self.delay_spinbox.setValue(1)
+        self.delay_spinbox.setSingleStep(1)
+        self.delay_spinbox.setToolTip(t("delay_tooltip") or
+            "Delay between API requests in seconds (reduce if API supports high rate limits)")
+        delay_layout.addWidget(self.delay_spinbox)
+
+        delay_hint = QLabel("(0-5s, ↓ = faster)")
+        delay_hint.setStyleSheet("color: #666; font-size: 11px;")
+        delay_layout.addWidget(delay_hint)
+        delay_layout.addStretch()
+
+        options_layout.addLayout(delay_layout)
+
+        # Performance info label
+        perf_info = QLabel("⚡ " + (t("performance_info") or
+            "Higher workers + lower delay = faster processing (check API rate limits)"))
+        perf_info.setStyleSheet("color: #0066cc; font-size: 11px; font-weight: bold;")
+        perf_info.setWordWrap(True)
+        options_layout.addWidget(perf_info)
+
         options_group.setLayout(options_layout)
         left_layout.addWidget(options_group)
 
@@ -325,6 +387,7 @@ class AbstractTab(QWidget):
         self.ai_assist_btn.setText(t("ai_mode_assistant_title") or "AI Assistant")
         self.verify_checkbox.setText(t("enable_verification"))
         self.workers_label.setText(t("concurrent_workers"))
+        self.delay_label.setText(t("api_delay_label") or "API Delay (s):")
         self.start_btn.setText(t("start_screening"))
         self.stop_btn.setText(t("stop_task"))
         self.stats_btn.setText(t("view_statistics"))
@@ -354,7 +417,7 @@ class AbstractTab(QWidget):
             self.file_entry.setText(file_path)
 
     def start_screening(self) -> None:
-        """Start abstract screening using QThread worker."""
+        """Start abstract screening using QThread worker with concurrent processing."""
         file_path = self.file_entry.text().strip()
         mode = self.mode_combo.currentText()
 
@@ -371,10 +434,17 @@ class AbstractTab(QWidget):
         self.log_text.clear()
         self.results_table.setRowCount(0)
 
-        # Create and configure worker thread
+        # Get settings from UI
         config = self.parent_window.build_config()
         verify_enabled = self.verify_checkbox.isChecked()
-        self.worker = AbstractScreeningWorker(config, file_path, mode, verify_enabled)
+        max_workers = self.workers_spinbox.value()
+        api_delay = self.delay_spinbox.value()
+
+        # Update config with UI settings
+        config["API_REQUEST_DELAY"] = api_delay
+
+        # Create and configure worker thread
+        self.worker = AbstractScreeningWorker(config, file_path, mode, verify_enabled, max_workers)
 
         # Connect worker signals to UI update slots
         self.worker.update_progress.connect(self._update_progress)
