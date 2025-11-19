@@ -21,7 +21,7 @@ class AIMatrixAssistantDialog(QDialog):
         self.setModal(True)
         self.resize(820, 600)
         self._config = config
-        self._generator = MatrixDimensionGenerator(config)
+        self._generator: Optional[MatrixDimensionGenerator] = None
         self.result: Optional[List[Dict[str, Any]]] = None
         self._build_ui()
 
@@ -63,6 +63,10 @@ class AIMatrixAssistantDialog(QDialog):
 
         def worker():
             try:
+                # Lazy initialization of generator to avoid crashing if API key not configured
+                if self._generator is None:
+                    self._generator = MatrixDimensionGenerator(self._config)
+
                 lang = self._config.get("LANGUAGE", "zh")
                 dims = self._generator.generate_dimensions(desc, lang)
                 def ok():
@@ -74,7 +78,11 @@ class AIMatrixAssistantDialog(QDialog):
             except Exception as e:
                 def err():
                     self.status.setText(t("generation_failed") or "Generation failed")
-                    QMessageBox.critical(self, t("error") or "Error", str(e))
+                    error_msg = str(e)
+                    # Provide helpful message for API key issues
+                    if "API key" in error_msg or "not configured" in error_msg:
+                        error_msg = f"{error_msg}\n\n请在主窗口配置 API 密钥。\nPlease configure API key in the main window."
+                    QMessageBox.critical(self, t("error") or "Error", error_msg)
                 self._invoke(err)
 
         threading.Thread(target=worker, daemon=True).start()
