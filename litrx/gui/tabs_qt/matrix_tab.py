@@ -266,8 +266,9 @@ class MatrixTab(QWidget):
 
     def _open_ai_dims(self) -> None:
         """Open AI assistant to generate dimensions and merge into current config."""
+        from PyQt6.QtWidgets import QDialog
         dlg = AIMatrixAssistantDialog(self, self.parent_window.build_config())
-        if dlg.exec() == dlg.Accepted and dlg.result:
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             dims = self.matrix_config.get('dimensions', []) or []
             dims.extend(dlg.result)
             self.matrix_config['dimensions'] = dims
