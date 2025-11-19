@@ -42,6 +42,7 @@ from .config import (
     load_env_file,
 )
 from .ai_client import AIClient
+from .exceptions import FileProcessingError
 from .logging_config import get_logger
 from .utils import AIResponseParser
 
@@ -251,13 +252,17 @@ def main() -> None:
 
     pdf_folder = config.get("INPUT_PDF_FOLDER_PATH")
     if not pdf_folder or not os.path.isdir(pdf_folder):
-        logger.error("错误：未提供有效的PDF文件夹路径。")
-        sys.exit(1)
+        raise FileProcessingError(
+            "未提供有效的PDF文件夹路径",
+            help_text="请使用 --pdf-folder 参数指定有效的PDF文件夹路径。"
+        )
 
     pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith(".pdf")]
     if not pdf_files:
-        logger.warning("在指定文件夹中未找到PDF文件。")
-        sys.exit(0)
+        raise FileProcessingError(
+            f"在指定文件夹中未找到PDF文件: {pdf_folder}",
+            help_text="请确认文件夹中包含 .pdf 格式的文件。"
+        )
 
     metadata_path = config.get("METADATA_FILE_PATH")
     if metadata_path:
