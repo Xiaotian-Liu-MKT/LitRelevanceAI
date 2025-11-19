@@ -22,6 +22,7 @@ from .logging_config import get_logger
 from .utils import AIResponseParser, ColumnDetector
 from .resources import resource_path
 from .exceptions import FileProcessingError, APIError, ValidationError
+from .token_tracker import TokenUsageTracker
 
 
 load_env_file()
@@ -56,6 +57,7 @@ class LiteratureAnalyzer:
         self.cache = get_cache() if config.get("ENABLE_CACHE", True) else None
         self.cache_hits = 0
         self.cache_misses = 0
+        self.token_tracker = TokenUsageTracker()
         logger.info(f"LiteratureAnalyzer initialized, caching={'enabled' if self.cache else 'disabled'}")
 
     def _load_prompt_template(self) -> str:
@@ -152,6 +154,10 @@ Please return in the following JSON format:
                 req_kwargs["temperature"] = self.config.get("TEMPERATURE", 0.3)
             response = self.client.request(messages=[{"role": "user", "content": prompt}], **req_kwargs)
             response_text = response["choices"][0]["message"]["content"].strip()
+
+            # Track token usage
+            if 'token_usage' in response:
+                self.token_tracker.add_usage(response['token_usage'])
 
             # Use unified parser with relevance-specific fallback
             result = AIResponseParser.parse_relevance_response(response_text)
@@ -284,6 +290,15 @@ Please return in the following JSON format:
                 hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
                 logger.info(f"Cache statistics: {self.cache_hits} hits, {self.cache_misses} misses ({hit_rate:.1f}% hit rate)")
                 logger.info(f"\nCache performance: {self.cache_hits} hits, {self.cache_misses} misses ({hit_rate:.1f}% hit rate)")
+
+            # Log token usage statistics
+            token_summary = self.token_tracker.get_summary()
+            logger.info(f"\nToken usage statistics:")
+            logger.info(f"  API calls: {token_summary['call_count']}")
+            logger.info(f"  {token_summary['summary_text']}")
+            logger.info(f"  In millions: Input={token_summary['input_M']:.3f}M, Output={token_summary['output_M']:.3f}M, Total={token_summary['total_M']:.3f}M")
+            if token_summary['call_count'] > 0:
+                logger.info(f"  Average tokens per call: {token_summary['avg_tokens_per_call']:.0f}")
 
         return results
 

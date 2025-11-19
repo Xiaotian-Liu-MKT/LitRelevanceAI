@@ -28,6 +28,7 @@ from .prompt_builder import PromptBuilder
 from .utils import AIResponseParser
 from .resources import resource_path
 from .exceptions import ConfigurationError, FileProcessingError, ValidationError
+from .token_tracker import TokenUsageTracker
 
 
 load_env_file()
@@ -290,7 +291,7 @@ def construct_flexible_prompt(title, abstract, config, open_questions, yes_no_qu
         detailed = [{'prompt_key': q['key'], 'question_text': q['question'], 'df_column_name': q['column_name']} for q in open_questions]
         return construct_ai_prompt(title, abstract, config['RESEARCH_QUESTION'], screening_criteria, detailed, prompts)
 
-def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_no_questions, max_retries=3):
+def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_no_questions, max_retries=3, token_tracker=None):
     def build_error_response(msg):
         data: Dict[str, Dict[str, str]] = {"quick_analysis": {}, "screening_results": {}}
         for q in open_questions:
@@ -306,6 +307,11 @@ def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_
             if getattr(client, "supports_temperature", True):
                 req_kwargs["temperature"] = 0.3
             response = client.request(messages=[{"role": "user", "content": prompt_text}], **req_kwargs)
+
+            # Track token usage
+            if token_tracker and 'token_usage' in response:
+                token_tracker.add_usage(response['token_usage'])
+
             return response['choices'][0]['message']['content'].strip()
         except Exception as e:
             logger.warning(f"第 {attempt + 1} 次尝试失败: {e}")
@@ -371,7 +377,7 @@ def parse_ai_response_json(ai_json_string, open_questions, yes_no_questions):
     return final_structure
 
 
-def verify_ai_response(title, abstract, initial_json, client, open_questions, yes_no_questions):
+def verify_ai_response(title, abstract, initial_json, client, open_questions, yes_no_questions, token_tracker=None):
     """Verify that AI answers are supported by the supplied title and abstract.
 
     The function sends the model a summary of its previous answers and asks it
@@ -428,6 +434,11 @@ def verify_ai_response(title, abstract, initial_json, client, open_questions, ye
         if getattr(client, "supports_temperature", True):
             req_kwargs["temperature"] = 0
         response = client.request(messages=[{"role": "user", "content": prompt}], **req_kwargs)
+
+        # Track token usage
+        if token_tracker and 'token_usage' in response:
+            token_tracker.add_usage(response['token_usage'])
+
         content = response["choices"][0]["message"]["content"].strip()
         return parse_ai_response_json(content, open_questions, yes_no_questions)
     except Exception as e:
@@ -506,6 +517,7 @@ class AbstractScreener:
         self.config = config
         self.client = client or AIClient(config)
         self.prompts = load_prompts()
+        self.token_tracker = TokenUsageTracker()
         logger.debug(f"AbstractScreener initialized with max_workers={config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)}, verification={config.get('ENABLE_VERIFICATION', True)}")
 
     def analyze_single_article(
@@ -586,7 +598,8 @@ class AbstractScreener:
             title, abstract, self.config, open_questions, yes_no_questions
         )
         ai_response_json_str = get_ai_response_with_retry(
-            prompt, self.client, self.config, open_questions, yes_no_questions
+            prompt, self.client, self.config, open_questions, yes_no_questions,
+            token_tracker=self.token_tracker
         )
         parsed_data = parse_ai_response_json(
             ai_response_json_str, open_questions, yes_no_questions
@@ -611,7 +624,8 @@ class AbstractScreener:
         # Verification
         if self.config.get('ENABLE_VERIFICATION', True):
             verification = verify_ai_response(
-                title, abstract, parsed_data, self.client, open_questions, yes_no_questions
+                title, abstract, parsed_data, self.client, open_questions, yes_no_questions,
+                token_tracker=self.token_tracker
             )
             results["verification"] = verification
 
@@ -793,6 +807,15 @@ class AbstractScreener:
 
         # Summary logging
         logger.info(f"Batch analysis complete: {completed_count}/{total} processed, {failed_count} failed")
+
+        # Log token usage statistics
+        token_summary = self.token_tracker.get_summary()
+        logger.info(f"\nToken usage statistics:")
+        logger.info(f"  API calls: {token_summary['call_count']}")
+        logger.info(f"  {token_summary['summary_text']}")
+        logger.info(f"  In millions: Input={token_summary['input_M']:.3f}M, Output={token_summary['output_M']:.3f}M, Total={token_summary['total_M']:.3f}M")
+        if token_summary['call_count'] > 0:
+            logger.info(f"  Average tokens per call: {token_summary['avg_tokens_per_call']:.0f}")
 
         if stop_event and stop_event.is_set():
             raise KeyboardInterrupt("Analysis stopped by user")
