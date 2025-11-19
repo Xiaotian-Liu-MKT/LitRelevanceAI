@@ -4,3 +4,7 @@ tqdm
 openpyxl
 pyyaml
 pypdf
+keyring
+pydantic>=2.0
+filelock>=3.12.0
+PyQt6>=6.6.0
