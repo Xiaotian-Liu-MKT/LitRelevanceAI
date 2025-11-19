@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -31,7 +32,7 @@ from ...matrix_analyzer import (
 )
 from ...i18n import get_i18n, t
 from ..dialogs_qt.ai_matrix_assistant_qt import AIMatrixAssistantDialog
-from ..dialogs_qt.dimensions_editor_qt import DimensionsEditorDialog
+from ..dialogs_qt.dimensions_editor_qt_v2 import DimensionsEditorDialog
 
 if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
@@ -246,7 +247,7 @@ class MatrixTab(QWidget):
             self._load_default_config()
 
     def _open_dimensions_editor(self) -> None:
-        """Open YAML text editor for current dimensions."""
+        """Open graphical editor for current dimensions."""
         dlg = DimensionsEditorDialog(self, self.matrix_config or {"dimensions": []})
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             self.matrix_config = dlg.result
