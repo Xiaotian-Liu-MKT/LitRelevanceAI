@@ -9,10 +9,20 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QTextEdit, QPlainTextEdit, QPushButton,
     QHBoxLayout, QMessageBox
 )
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from ...ai_config_generator import AbstractModeGenerator
 from ...i18n import t
 from ..widgets.ime_text_edit import IMEPlainTextEdit
+from ...logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class WorkerSignals(QObject):
+    """Signals for worker thread to communicate with UI thread."""
+    success = pyqtSignal(dict)  # Emits generated config data
+    error = pyqtSignal(str)     # Emits error message
 
 
 class AIModeAssistantDialog(QDialog):
@@ -27,7 +37,14 @@ class AIModeAssistantDialog(QDialog):
         self._generator: Optional[AbstractModeGenerator] = None
         self._closed = False
         self.result: Optional[Dict[str, Any]] = None
+
+        # Initialize worker signals
+        self._signals = WorkerSignals()
+        self._signals.success.connect(self._on_generation_success)
+        self._signals.error.connect(self._on_generation_error)
+
         self._build_ui()
+        logger.debug("AIModeAssistantDialog initialized")
 
     def _build_ui(self) -> None:
         lay = QVBoxLayout(self)
@@ -86,63 +103,124 @@ class AIModeAssistantDialog(QDialog):
         if not desc:
             QMessageBox.warning(self, t("warning") or "Warning", t("please_enter_description") or "Please enter a description")
             return
+
+        logger.info("User clicked Generate button, description length=%d", len(desc))
         self.gen_btn.setEnabled(False)
         self.apply_btn.setEnabled(False)
         self.status.setText(t("generating") or "Generating...")
 
         def worker():
             try:
+                logger.info("Worker thread started for AI mode generation")
+
                 # Lazy initialization of generator to avoid crashing if API key not configured
                 if self._generator is None:
+                    logger.debug("Lazy initializing AbstractModeGenerator")
                     self._generator = AbstractModeGenerator(self._config)
 
                 lang = self._config.get("LANGUAGE", "zh")
-                from ...logging_config import get_logger as _get_logger
-                _log = _get_logger(__name__)
-                _log.info("AIModeAssistant: generation started (lang=%s)", lang)
+                logger.info("AIModeAssistant: generation started (lang=%s)", lang)
+
+                # Call the generator
                 data = self._generator.generate_mode(desc, lang)
-                def ok():
-                    if self._closed or not self.isVisible():
-                        # Re-enable button even if dialog was closed
-                        if not self._closed:
-                            self.gen_btn.setEnabled(True)
-                        return
-                    _log.info("AIModeAssistant: generation succeeded; updating UI")
-                    self.result = data
-                    self.preview.setPlainText(json_pretty(data))
-                    self.status.setText(t("generation_success") or "Generation succeeded")
-                    self.apply_btn.setEnabled(True)
-                    self.gen_btn.setEnabled(True)
-                self._invoke(ok)
+
+                logger.info("AIModeAssistant: generator returned, data type=%s", type(data).__name__)
+
+                # Validate data before emitting
+                if not isinstance(data, dict):
+                    raise TypeError(f"Expected dict from generator, got {type(data).__name__}")
+
+                # Emit success signal to UI thread
+                logger.info("Emitting success signal to UI thread")
+                self._signals.success.emit(data)
+
             except Exception as e:
-                def err():
-                    if self._closed:
-                        return
-                    self.status.setText(t("generation_failed") or "Generation failed")
-                    error_msg = str(e)
-                    # Provide helpful message for API key issues
-                    if "API key" in error_msg or "not configured" in error_msg:
-                        error_msg = f"{error_msg}\n\n请在主窗口配置 API 密钥。\nPlease configure API key in the main window."
-                    if self.isVisible():
-                        QMessageBox.critical(self, t("error") or "Error", error_msg)
-                    self.gen_btn.setEnabled(True)
-                    self.apply_btn.setEnabled(False)
-                self._invoke(err)
+                logger.error("Worker thread caught exception: %s", e, exc_info=True)
+                error_msg = str(e)
+
+                # Provide helpful message for API key issues
+                if "API key" in error_msg or "not configured" in error_msg:
+                    error_msg = f"{error_msg}\n\n请在主窗口配置 API 密钥。\nPlease configure API key in the main window."
+
+                # Emit error signal to UI thread
+                logger.info("Emitting error signal to UI thread")
+                self._signals.error.emit(error_msg)
 
         threading.Thread(target=worker, daemon=True).start()
+        logger.debug("Worker thread launched")
+
+    def _on_generation_success(self, data: Dict[str, Any]) -> None:
+        """Handle successful generation in UI thread (slot connected to signal)."""
+        try:
+            logger.info("_on_generation_success called in UI thread")
+
+            if self._closed or not self.isVisible():
+                logger.warning("Dialog closed or not visible, skipping UI update")
+                if not self._closed:
+                    self.gen_btn.setEnabled(True)
+                return
+
+            logger.info("Updating UI with generated data")
+            self.result = data
+
+            # Safely format JSON for preview
+            try:
+                preview_text = json_pretty(data)
+                logger.debug("JSON preview generated, length=%d", len(preview_text))
+            except Exception as e:
+                logger.error("Failed to format JSON for preview: %s", e, exc_info=True)
+                preview_text = str(data)
+
+            self.preview.setPlainText(preview_text)
+            self.status.setText(t("generation_success") or "Generation succeeded")
+            self.apply_btn.setEnabled(True)
+            self.gen_btn.setEnabled(True)
+
+            logger.info("UI update completed successfully")
+
+        except Exception as e:
+            logger.error("Exception in _on_generation_success: %s", e, exc_info=True)
+            self.status.setText(t("generation_failed") or "Generation failed")
+            QMessageBox.critical(
+                self,
+                t("error") or "Error",
+                f"UI 更新时发生错误: {e}\nError updating UI: {e}"
+            )
+            self.gen_btn.setEnabled(True)
+            self.apply_btn.setEnabled(False)
+
+    def _on_generation_error(self, error_msg: str) -> None:
+        """Handle generation error in UI thread (slot connected to signal)."""
+        try:
+            logger.info("_on_generation_error called in UI thread")
+
+            if self._closed:
+                logger.warning("Dialog closed, skipping error display")
+                return
+
+            self.status.setText(t("generation_failed") or "Generation failed")
+
+            if self.isVisible():
+                QMessageBox.critical(self, t("error") or "Error", error_msg)
+
+            self.gen_btn.setEnabled(True)
+            self.apply_btn.setEnabled(False)
+
+            logger.info("Error handling completed")
+
+        except Exception as e:
+            logger.error("Exception in _on_generation_error: %s", e, exc_info=True)
 
     def _on_apply(self) -> None:
         if not self.result:
+            logger.warning("Apply clicked but no result available")
             return
+        logger.info("User clicked Apply, accepting dialog")
         self.accept()
-
-    def _invoke(self, fn):
-        # simple helper to marshal to UI thread
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(0, fn)
 
     def reject(self) -> None:
         # mark closed to avoid unsafe UI updates from worker
+        logger.info("Dialog rejected/closed by user")
         self._closed = True
         return super().reject()
 
