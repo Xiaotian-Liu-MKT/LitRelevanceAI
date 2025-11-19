@@ -681,7 +681,7 @@ class AbstractTab(QWidget):
 
     def open_ai_mode_assistant(self) -> None:
         """Launch AI assistant to generate a new screening mode and save it."""
-        dlg = AIModeAssistantDialog(self, self.app.build_config())
+        dlg = AIModeAssistantDialog(self, self.parent_window.build_config())
         if dlg.exec() == dlg.Accepted and dlg.result:
             try:
                 # Load existing config
