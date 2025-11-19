@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import os
-import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -36,25 +35,111 @@ if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
 
 
+class CsvAnalysisWorker(QThread):
+    """Worker thread for CSV analysis processing.
+
+    This QThread-based worker handles CSV analysis in the background,
+    emitting signals for thread-safe UI updates.
+    """
+
+    # Signals for thread-safe communication with main thread
+    update_row = pyqtSignal(int, str, object, str)  # row, title, score, analysis
+    update_progress = pyqtSignal(float)  # progress percentage
+    show_error = pyqtSignal(str, str)  # title, message
+    show_info = pyqtSignal(str, str)  # title, message
+    enable_export = pyqtSignal()
+    finished_processing = pyqtSignal()  # Emitted when done (success or cancelled)
+
+    def __init__(self, config: dict, path: str, topic: str, task: CancellableTask):
+        """Initialize the worker.
+
+        Args:
+            config: Configuration dictionary
+            path: Path to CSV file
+            topic: Research topic
+            task: CancellableTask for cancellation support
+        """
+        super().__init__()
+        self.config = config
+        self.path = path
+        self.topic = topic
+        self.task = task
+        self.df: Optional[pd.DataFrame] = None
+        self.analyzer: Optional[LiteratureAnalyzer] = None
+
+    def run(self) -> None:
+        """Run the analysis (executed in background thread)."""
+        analyzer = LiteratureAnalyzer(self.config, self.topic)
+
+        try:
+            df = analyzer.read_scopus_csv(self.path)
+        except Exception as e:
+            self.show_error.emit(t("error"), t("error_read_file", error=str(e)))
+            self.finished_processing.emit()
+            return
+
+        self.df = df
+        self.analyzer = analyzer
+        total = len(df)
+
+        try:
+            # Process all papers with cancellation checks
+            for i, (idx, row) in enumerate(df.iterrows(), start=1):
+                # Check for cancellation
+                if self.task and self.task.is_cancelled():
+                    self.show_info.emit(t("hint"), t("task_stopped"))
+                    break
+
+                try:
+                    res = analyzer.analyze_paper(row['Title'], row['Abstract'])
+                    analyzer.apply_result_to_dataframe(df, idx, res)
+
+                    summary = res['analysis'].replace('\n', ' ')[:80]
+                    self.update_row.emit(i - 1, row['Title'], res['relevance_score'], summary)
+
+                except Exception as e:
+                    error_msg = t("error_analysis", error=str(e))
+                    self.update_row.emit(i - 1, row['Title'], '', error_msg)
+
+                # Update progress bar
+                self.update_progress.emit(i / total * 100)
+
+            # Enable export button when done (only if not cancelled)
+            if not (self.task and self.task.is_cancelled()):
+                # Auto-save results beside the input CSV with timestamped name
+                try:
+                    file_dir = os.path.dirname(self.path)
+                    file_name = os.path.splitext(os.path.basename(self.path))[0]
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    out_path = os.path.join(file_dir, f"{file_name}_analyzed_{timestamp}.csv")
+                    df.to_csv(out_path, index=False, encoding='utf-8-sig')
+                    self.show_info.emit(t("success"), t("complete_saved", path=out_path))
+                except Exception as e:
+                    self.show_error.emit(t("error"), str(e))
+                self.enable_export.emit()
+
+        except TaskCancelledException:
+            self.show_info.emit(t("hint"), t("task_stopped"))
+
+        except Exception as e:
+            self.show_error.emit(t("error"), t("error_analysis", error=str(e)))
+
+        finally:
+            self.finished_processing.emit()
+
+
 class CsvTab(QWidget):
     """Tab for CSV relevance analysis."""
-
-    # Signals for thread-safe UI updates
-    update_row_signal = pyqtSignal(int, str, object, str)
-    update_progress_signal = pyqtSignal(float)
-    show_error_signal = pyqtSignal(str, str)
-    show_info_signal = pyqtSignal(str, str)
-    enable_export_signal = pyqtSignal()
-    restore_buttons_signal = pyqtSignal()
 
     def __init__(self, parent: BaseWindow) -> None:
         super().__init__()
         self.parent_window = parent
 
-        # Data
+        # Worker thread and task management
+        self.worker: Optional[CsvAnalysisWorker] = None
+        self.current_task: Optional[CancellableTask] = None
         self.df: Optional[pd.DataFrame] = None
         self.analyzer: Optional[LiteratureAnalyzer] = None
-        self.current_task: Optional[CancellableTask] = None
 
         # Layout
         layout = QVBoxLayout(self)
@@ -118,14 +203,6 @@ class CsvTab(QWidget):
         self.export_btn.setEnabled(False)
         layout.addWidget(self.export_btn)
 
-        # Connect signals
-        self.update_row_signal.connect(self._update_row)
-        self.update_progress_signal.connect(self._update_progress)
-        self.show_error_signal.connect(self._show_error)
-        self.show_info_signal.connect(self._show_info)
-        self.enable_export_signal.connect(self._enable_export)
-        self.restore_buttons_signal.connect(self._restore_buttons)
-
         # Register for language change notifications
         get_i18n().add_observer(self.update_language)
 
@@ -151,7 +228,7 @@ class CsvTab(QWidget):
             self.file_entry.setText(file_path)
 
     def start_analysis(self) -> None:
-        """Start CSV analysis with cancellation support."""
+        """Start CSV analysis using QThread worker."""
         path = self.file_entry.text().strip()
         topic = self.topic_entry.text().strip()
         if not path or not topic:
@@ -170,8 +247,20 @@ class CsvTab(QWidget):
         # Create cancellable task
         self.current_task = CancellableTask()
 
-        # Start processing in background thread
-        threading.Thread(target=self.process_csv, args=(path, topic), daemon=True).start()
+        # Create and configure worker thread
+        config = self.parent_window.build_config()
+        self.worker = CsvAnalysisWorker(config, path, topic, self.current_task)
+
+        # Connect worker signals to UI update slots
+        self.worker.update_row.connect(self._update_row)
+        self.worker.update_progress.connect(self._update_progress)
+        self.worker.show_error.connect(self._show_error)
+        self.worker.show_info.connect(self._show_info)
+        self.worker.enable_export.connect(self._enable_export)
+        self.worker.finished_processing.connect(self._on_worker_finished)
+
+        # Start the worker thread
+        self.worker.start()
 
     def stop_analysis(self) -> None:
         """Stop the current analysis task."""
@@ -179,66 +268,22 @@ class CsvTab(QWidget):
             self.current_task.cancel()
             self.stop_btn.setEnabled(False)
 
-    def process_csv(self, path: str, topic: str) -> None:
-        """Process CSV file with thread-safe updates and cancellation support."""
-        config = self.parent_window.build_config()
-        analyzer = LiteratureAnalyzer(config, topic)
+        # Note: Worker will detect cancellation and finish gracefully
 
-        try:
-            df = analyzer.read_scopus_csv(path)
-        except Exception as e:
-            self.show_error_signal.emit(t("error"), t("error_read_file", error=str(e)))
-            self.restore_buttons_signal.emit()
-            return
+    def _on_worker_finished(self) -> None:
+        """Called when worker thread finishes (success or cancelled)."""
+        # Copy results from worker to main thread
+        if self.worker:
+            self.df = self.worker.df
+            self.analyzer = self.worker.analyzer
 
-        self.df = df
-        self.analyzer = analyzer
-        total = len(df)
+        # Restore button states
+        self._restore_buttons()
 
-        try:
-            # Process all papers with cancellation checks
-            for i, (idx, row) in enumerate(df.iterrows(), start=1):
-                # Check for cancellation
-                if self.current_task and self.current_task.is_cancelled():
-                    self.show_info_signal.emit(t("hint"), t("task_stopped"))
-                    break
-
-                try:
-                    res = analyzer.analyze_paper(row['Title'], row['Abstract'])
-                    analyzer.apply_result_to_dataframe(df, idx, res)
-
-                    summary = res['analysis'].replace('\n', ' ')[:80]
-                    self.update_row_signal.emit(i - 1, row['Title'], res['relevance_score'], summary)
-
-                except Exception as e:
-                    error_msg = t("error_analysis", error=str(e))
-                    self.update_row_signal.emit(i - 1, row['Title'], '', error_msg)
-
-                # Update progress bar
-                self.update_progress_signal.emit(i / total * 100)
-
-            # Enable export button when done (only if not cancelled)
-            if not (self.current_task and self.current_task.is_cancelled()):
-                # Auto-save results beside the input CSV with timestamped name
-                try:
-                    file_dir = os.path.dirname(path)
-                    file_name = os.path.splitext(os.path.basename(path))[0]
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    out_path = os.path.join(file_dir, f"{file_name}_analyzed_{timestamp}.csv")
-                    df.to_csv(out_path, index=False, encoding='utf-8-sig')
-                    self.show_info_signal.emit(t("success"), t("complete_saved", path=out_path))
-                except Exception as e:
-                    self.show_error_signal.emit(t("error"), str(e))
-                self.enable_export_signal.emit()
-
-        except TaskCancelledException:
-            self.show_info_signal.emit(t("hint"), t("task_stopped"))
-
-        except Exception as e:
-            self.show_error_signal.emit(t("error"), t("error_analysis", error=str(e)))
-
-        finally:
-            self.restore_buttons_signal.emit()
+        # Clean up worker reference
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
 
     def _update_row(self, row: int, title: str, score, analysis: str) -> None:
         """Update a row in the table (called from main thread)."""

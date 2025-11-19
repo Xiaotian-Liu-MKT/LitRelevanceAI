@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -38,24 +37,102 @@ if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
 
 
+class MatrixAnalysisWorker(QThread):
+    """Worker thread for literature matrix analysis processing.
+
+    This QThread-based worker handles matrix analysis in the background,
+    emitting signals for thread-safe UI updates.
+    """
+
+    # Signals for thread-safe communication with main thread
+    update_progress = pyqtSignal(float)  # progress percentage
+    append_log = pyqtSignal(str)  # log text to append
+    show_error = pyqtSignal(str, str)  # title, message
+    show_info = pyqtSignal(str, str)  # title, message
+    finished_processing = pyqtSignal()  # Emitted when done (success or cancelled)
+
+    def __init__(
+        self,
+        config: Dict,
+        pdf_folder: str,
+        metadata_file: Optional[str],
+        output_file: str,
+        matrix_config: Dict
+    ):
+        """Initialize the worker.
+
+        Args:
+            config: AI configuration dictionary
+            pdf_folder: Path to PDF folder
+            metadata_file: Optional path to metadata file
+            output_file: Path to output file
+            matrix_config: Matrix dimension configuration
+        """
+        super().__init__()
+        self.config = config
+        self.pdf_folder = pdf_folder
+        self.metadata_file = metadata_file
+        self.output_file = output_file
+        self.matrix_config = matrix_config
+        self.stop_flag = False
+
+    def stop(self) -> None:
+        """Request the worker to stop processing."""
+        self.stop_flag = True
+
+    def run(self) -> None:
+        """Run the matrix analysis (executed in background thread)."""
+        try:
+            self.append_log.emit("Starting matrix analysis...")
+
+            # Process literature matrix
+            results_df = process_literature_matrix(
+                pdf_folder=self.pdf_folder,
+                matrix_config=self.matrix_config,
+                ai_config=self.config,
+                metadata_file=self.metadata_file,
+                progress_callback=self._progress_callback
+            )
+
+            if self.stop_flag:
+                self.show_info.emit("Info", "Analysis stopped by user")
+                return
+
+            # Save results
+            save_results(results_df, self.output_file)
+
+            self.append_log.emit(f"Results saved to: {self.output_file}")
+            self.show_info.emit("Success", "Matrix analysis completed successfully!")
+
+        except Exception as e:
+            self.show_error.emit("Error", f"Analysis failed: {e}")
+
+        finally:
+            self.finished_processing.emit()
+
+    def _progress_callback(self, current: int, total: int, message: str = "") -> None:
+        """Progress callback for matrix analysis (called from worker thread)."""
+        if self.stop_flag:
+            raise Exception("Analysis stopped by user")
+
+        progress = (current / total * 100) if total > 0 else 0
+        self.update_progress.emit(progress)
+
+        if message:
+            self.append_log.emit(f"[{current}/{total}] {message}")
+
+
 class MatrixTab(QWidget):
     """Tab for Literature Matrix Analysis."""
-
-    # Signals for thread-safe UI updates
-    update_progress_signal = pyqtSignal(float)
-    append_log_signal = pyqtSignal(str)
-    show_error_signal = pyqtSignal(str, str)
-    show_info_signal = pyqtSignal(str, str)
-    restore_buttons_signal = pyqtSignal()
 
     def __init__(self, parent: BaseWindow) -> None:
         super().__init__()
         self.parent_window = parent
 
-        # Data
+        # Worker thread and data
+        self.worker: Optional[MatrixAnalysisWorker] = None
         self.matrix_config: Dict[str, Any] = {}
         self.default_config_path = Path(__file__).resolve().parents[3] / "configs" / "matrix" / "default.yaml"
-        self.stop_flag = False
 
         # Layout
         layout = QVBoxLayout(self)
@@ -174,13 +251,6 @@ class MatrixTab(QWidget):
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumHeight(200)
         layout.addWidget(self.log_text)
-
-        # Connect signals
-        self.update_progress_signal.connect(self._update_progress)
-        self.append_log_signal.connect(self._append_log)
-        self.show_error_signal.connect(self._show_error)
-        self.show_info_signal.connect(self._show_info)
-        self.restore_buttons_signal.connect(self._restore_buttons)
 
         # Load default config
         self._load_default_config()
@@ -315,7 +385,7 @@ class MatrixTab(QWidget):
             self.output_entry.setText(file_path)
 
     def start_analysis(self) -> None:
-        """Start matrix analysis."""
+        """Start matrix analysis using QThread worker."""
         pdf_folder = self.folder_entry.text().strip()
         output_file = self.output_entry.text().strip()
 
@@ -328,64 +398,40 @@ class MatrixTab(QWidget):
         self.stop_btn.setEnabled(True)
         self.progress_bar.setValue(0)
         self.log_text.clear()
-        self.stop_flag = False
 
-        # Start processing in background thread
+        # Create and configure worker thread
+        config = self.parent_window.build_config()
         metadata_file = self.meta_entry.text().strip() or None
-        threading.Thread(
-            target=self.process_analysis,
-            args=(pdf_folder, metadata_file, output_file),
-            daemon=True
-        ).start()
+        self.worker = MatrixAnalysisWorker(
+            config, pdf_folder, metadata_file, output_file, self.matrix_config
+        )
+
+        # Connect worker signals to UI update slots
+        self.worker.update_progress.connect(self._update_progress)
+        self.worker.append_log.connect(self._append_log)
+        self.worker.show_error.connect(self._show_error)
+        self.worker.show_info.connect(self._show_info)
+        self.worker.finished_processing.connect(self._on_worker_finished)
+
+        # Start the worker thread
+        self.worker.start()
 
     def stop_analysis(self) -> None:
         """Stop the analysis process."""
-        self.stop_flag = True
-        self.stop_btn.setEnabled(False)
-        self.append_log_signal.emit("Stopping...")
+        if self.worker:
+            self.worker.stop()
+            self.stop_btn.setEnabled(False)
+            self._append_log("Stopping...")
 
-    def process_analysis(self, pdf_folder: str, metadata_file: Optional[str], output_file: str) -> None:
-        """Process matrix analysis in background thread."""
-        config = self.parent_window.build_config()
+    def _on_worker_finished(self) -> None:
+        """Called when worker thread finishes (success or cancelled)."""
+        # Restore button states
+        self._restore_buttons()
 
-        try:
-            self.append_log_signal.emit("Starting matrix analysis...")
-
-            # Process literature matrix
-            results_df = process_literature_matrix(
-                pdf_folder=pdf_folder,
-                matrix_config=self.matrix_config,
-                ai_config=config,
-                metadata_file=metadata_file,
-                progress_callback=self._progress_callback
-            )
-
-            if self.stop_flag:
-                self.show_info_signal.emit("Info", "Analysis stopped by user")
-                return
-
-            # Save results
-            save_results(results_df, output_file)
-
-            self.append_log_signal.emit(f"Results saved to: {output_file}")
-            self.show_info_signal.emit("Success", "Matrix analysis completed successfully!")
-
-        except Exception as e:
-            self.show_error_signal.emit("Error", f"Analysis failed: {e}")
-
-        finally:
-            self.restore_buttons_signal.emit()
-
-    def _progress_callback(self, current: int, total: int, message: str = "") -> None:
-        """Progress callback for matrix analysis."""
-        if self.stop_flag:
-            raise Exception("Analysis stopped by user")
-
-        progress = (current / total * 100) if total > 0 else 0
-        self.update_progress_signal.emit(progress)
-
-        if message:
-            self.append_log_signal.emit(f"[{current}/{total}] {message}")
+        # Clean up worker reference
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
 
     def _update_progress(self, value: float) -> None:
         """Update progress bar."""

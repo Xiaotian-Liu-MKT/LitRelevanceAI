@@ -8,6 +8,51 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
+# Lazy import to avoid circular dependency
+_SecureLogger = None
+
+
+def _get_secure_logger():
+    """Lazy import of SecureLogger to avoid circular dependency."""
+    global _SecureLogger
+    if _SecureLogger is None:
+        from .security_utils import SecureLogger
+        _SecureLogger = SecureLogger
+    return _SecureLogger
+
+
+def _secure_exception_hook(exc_type, exc_value, exc_traceback):
+    """Global exception handler that sanitizes sensitive information before logging.
+
+    This hook is installed by setup_logging() to catch uncaught exceptions
+    and ensure API keys or other sensitive data don't leak into logs.
+
+    Args:
+        exc_type: Exception type
+        exc_value: Exception instance
+        exc_traceback: Traceback object
+    """
+    # Don't log KeyboardInterrupt (user cancelled)
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    # Get logger and SecureLogger
+    logger = logging.getLogger("litrx")
+    SecureLogger = _get_secure_logger()
+
+    # Sanitize exception message
+    safe_message = SecureLogger.sanitize_error(exc_value)
+
+    # Log sanitized exception
+    logger.critical(
+        f"Uncaught exception: {exc_type.__name__}: {safe_message}",
+        exc_info=(exc_type, exc_value, exc_traceback)
+    )
+
+    # Call the default exception hook to ensure normal error handling
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
 
 def setup_logging(
     log_level: str = "INFO",
@@ -70,7 +115,11 @@ def setup_logging(
         console_handler.setFormatter(console_formatter)
         logger.addHandler(console_handler)
 
+    # Install global exception hook for security
+    sys.excepthook = _secure_exception_hook
+
     logger.info(f"Logging configured. Log file: {log_file}")
+    logger.debug("Global exception hook installed for sensitive data protection")
     return logger
 
 
