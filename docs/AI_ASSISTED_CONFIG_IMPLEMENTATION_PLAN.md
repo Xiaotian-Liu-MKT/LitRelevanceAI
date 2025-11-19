@@ -13,7 +13,7 @@
 
 ### 技术栈
 - 后端逻辑: Python 3.8+
-- GUI: Tkinter
+- GUI: PyQt6
 - AI: OpenAI SDK (现有 AIClient)
 - 配置: YAML, JSON
 
@@ -31,14 +31,19 @@
 ```python
 class AbstractModeGenerator:
     def __init__(self, config: dict):
-        self.client = AIClient(config["AI_SERVICE"], config)
+        # 适配现有 AIClient 接口
+        self.client = AIClient(config)
         self.prompt_template = self._load_prompt_template()
 
     def generate_mode(self, description: str, language: str = "zh") -> dict:
         """主入口: 生成模式配置"""
         prompt = self._build_prompt(description, language)
-        response = self.client.request(prompt, temperature=0.3)
-        config = self._parse_json_response(response)
+        req = {"messages": [{"role": "user", "content": prompt}]}
+        if getattr(self.client, "supports_temperature", True):
+            req["temperature"] = 0.3
+        response = self.client.request(**req)
+        content = response["choices"][0]["message"]["content"]
+        config = self._parse_json_response(content)
         self._validate_config(config)
         return config
 
@@ -78,7 +83,9 @@ class AbstractModeGenerator:
 
     def _load_prompt_template(self) -> str:
         """加载提示词模板"""
-        template_path = Path(__file__).parent / "prompts" / "abstract_mode_generation.txt"
+        # 使用统一资源定位，兼容打包
+        from .resources import resource_path
+        template_path = resource_path("litrx", "prompts", "abstract_mode_generation.txt")
         if template_path.exists():
             return template_path.read_text(encoding="utf-8")
         return self._get_default_template()
@@ -118,14 +125,18 @@ class MatrixDimensionGenerator:
                        "number", "rating", "list"]
 
     def __init__(self, config: dict):
-        self.client = AIClient(config["AI_SERVICE"], config)
+        self.client = AIClient(config)
         self.prompt_template = self._load_prompt_template()
 
     def generate_dimensions(self, description: str, language: str = "zh") -> list[dict]:
         """主入口: 生成维度列表"""
         prompt = self._build_prompt(description, language)
-        response = self.client.request(prompt, temperature=0.3)
-        dimensions = self._parse_yaml_response(response)
+        req = {"messages": [{"role": "user", "content": prompt}]}
+        if getattr(self.client, "supports_temperature", True):
+            req["temperature"] = 0.3
+        response = self.client.request(**req)
+        content = response["choices"][0]["message"]["content"]
+        dimensions = self._parse_yaml_response(content)
         for dim in dimensions:
             self._validate_dimension(dim)
         return dimensions
@@ -201,7 +212,7 @@ Guidelines:
 
 #### 1.2 创建提示词模板文件
 
-**文件 1**: `litrx/prompts/abstract_mode_generation.txt`
+**文件 1**: `litrx/prompts/abstract_mode_generation.txt`（通过 `resource_path()` 读取）
 ```
 You are an expert in academic literature screening and research methodology.
 
@@ -259,7 +270,7 @@ Output:
 }}
 ```
 
-**文件 2**: `litrx/prompts/matrix_dimension_generation.txt`
+**文件 2**: `litrx/prompts/matrix_dimension_generation.txt`（通过 `resource_path()` 读取）
 ```
 You are an expert in systematic literature review and data extraction.
 
@@ -336,7 +347,7 @@ dimensions:
     scale_description: "1=很差, 5=优秀"
 ```
 
-#### 1.3 单元测试
+#### 1.3 单元测试（适配 OpenAI SDK 返回结构）
 
 **文件**: `tests/test_ai_config_generator.py`
 
@@ -364,14 +375,13 @@ def mock_ai_client(mocker):
 
 def test_abstract_mode_generator_basic(mock_config, mock_ai_client):
     """测试基本模式生成"""
-    mock_ai_client.request.return_value = '''
-    {
-      "mode_key": "test_mode",
-      "description": "测试模式",
-      "yes_no_questions": [{"key": "q1", "question": "问题1?", "column_name": "列1"}],
-      "open_questions": [{"key": "q2", "question": "问题2?", "column_name": "列2"}]
+    mock_ai_client.request.return_value = {
+        "choices": [{
+            "message": {
+                "content": '{\n  "mode_key": "test_mode",\n  "description": "测试模式",\n  "yes_no_questions": [{"key": "q1", "question": "问题1?", "column_name": "列1"}],\n  "open_questions": [{"key": "q2", "question": "问题2?", "column_name": "列2"}]\n}'
+            }
+        }]
     }
-    '''
 
     generator = AbstractModeGenerator(mock_config)
     result = generator.generate_mode("测试描述")
@@ -383,18 +393,13 @@ def test_abstract_mode_generator_basic(mock_config, mock_ai_client):
 
 def test_matrix_dimension_generator_basic(mock_config, mock_ai_client):
     """测试基本维度生成"""
-    mock_ai_client.request.return_value = '''
-    dimensions:
-      - type: text
-        key: findings
-        question: "主要发现?"
-        column_name: "发现"
-      - type: rating
-        key: quality
-        question: "质量评分"
-        column_name: "质量"
-        scale: 5
-    '''
+    mock_ai_client.request.return_value = {
+        "choices": [{
+            "message": {
+                "content": 'dimensions:\n  - type: text\n    key: findings\n    question: "主要发现?"\n    column_name: "发现"\n  - type: rating\n    key: quality\n    question: "质量评分"\n    column_name: "质量"\n    scale: 5\n'
+            }
+        }]
+    }
 
     generator = MatrixDimensionGenerator(mock_config)
     result = generator.generate_dimensions("测试描述")
@@ -424,11 +429,11 @@ def test_validation_errors(mock_config):
 
 ---
 
-### Phase 2: GUI 对话框 (2-3天)
+### Phase 2: GUI 对话框 (2-3天，PyQt6)
 
-#### 2.1 摘要模式 AI 助手对话框
+#### 2.1 摘要模式 AI 助手对话框（PyQt6）
 
-**文件**: `litrx/gui/dialogs/ai_mode_assistant.py`
+**文件**: `litrx/gui/dialogs_qt/ai_mode_assistant_qt.py`（PyQt6）
 
 ```python
 """AI assistant dialog for creating abstract screening modes."""
@@ -462,13 +467,7 @@ class AIModeAssistantDialog:
         self._center_dialog()
 
     def _create_widgets(self):
-        main_frame = ttk.Frame(self.dialog, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 1. 引导文本
-        guide_text = t("ai_mode_guide")
-        guide_label = ttk.Label(main_frame, text=guide_text, wraplength=650)
-        guide_label.pack(anchor=tk.W, pady=(0, 10))
+        # 省略：此处为 PyQt6 界面元素，见设计文档（采用 QLabel/QTextEdit/QPushButton 组合）
 
         # 2. 用户输入框
         ttk.Label(main_frame, text=t("describe_your_needs")).pack(anchor=tk.W)

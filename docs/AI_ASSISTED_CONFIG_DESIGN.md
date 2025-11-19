@@ -2,7 +2,15 @@
 
 **版本**: 1.0
 **日期**: 2025-11-19
-**状态**: 设计阶段
+**状态**: 设计阶段（适配 PyQt6 + OpenAI SDK）
+
+> 适配说明（关键对齐点）
+> - GUI 使用 PyQt6，对话框文件建议位于 `litrx/gui/dialogs_qt/`
+> - AIClient 使用 OpenAI 官方 SDK（SiliconFlow 走兼容 API），请求形如 `client.request(messages=[...], **kwargs)`
+> - 模型能力（如 GPT‑5/o* 禁止自定义 temperature）在 AIClient 初始化时缓存，不支持时自动剥离该参数
+> - 提示词文件通过 `resource_path()` 读取（如 `resource_path("litrx","prompts","abstract_mode_generation.txt")`），PyInstaller 打包时需收集 prompts 目录
+> - 保存/合并策略需处理冲突并落地 `.bak` 备份；写回 `questions_config.json` 或 `configs/matrix/<preset>.yaml`
+> - i18n 需补充对话框相关键（生成/预览/应用/覆盖/重命名等）
 
 ---
 
@@ -140,13 +148,122 @@
   → 用户可继续手动编辑
 ```
 
-### 2.3 AI 生成规则
+### 2.3 AI 生成规则（OpenAI SDK 请求约定）
+
+### 2.4 提示词与资源加载
+提示词文件：
+- `litrx/prompts/abstract_mode_generation.txt`
+- `litrx/prompts/matrix_dimension_generation.txt`
+
+读取方式：通过 `resource_path()` 统一定位（兼容 PyInstaller 冻结目录），若文件缺失则回退到内置默认模板。
+
+打包：在 PyInstaller spec 中收集 `litrx/prompts/` 目录。
+
+### 2.5 数据与配置落地策略
+读优先级（低→高）：内置默认 → 用户持久化（`~/.litrx`）→ 运行时编辑。冻结后写入用户目录，非冻结可写项目根。保存前创建 `.bak.<timestamp>`。
+
+### 2.6 冲突与合并策略
+摘要模式（mode_key 冲突）：覆盖/重命名/取消；默认重命名为 `<mode_key>_<n>`。矩阵维度 preset：覆盖/另存为/取消。覆盖前展示 diff；另存为要求新文件名。
+
+### 2.7 失败与回退机制
+解析失败展示原文与修正提示；网络失败可重试/取消；温度等模型约束由 AIClient 自动处理；写入失败提示另存到用户目录。
+
+### 2.8 安全与隐私
+仅提交“用户需求描述”给模型；不要上传文献原文。提供“离线演示模式”选项（不联网，仅演示模板）。
+
+### 2.9 i18n 交互文案（新增/复用键）
+ai_mode_assistant_title, ai_matrix_assistant_title, generate_config, regenerate, apply_changes, apply_selected, overwrite, rename, cancel, preview_label, select_dimensions_to_apply, describe_your_needs, ai_mode_guide, error_parse_ai_response, error_invalid_structure, retry, conflict_mode_key, conflict_preset_name, choose_action, saved_with_backup。
+
+---
+
+## 3. 架构与数据流（详细）
+组件：生成器（解析/校验）、对话框（收集/预览/保存）、持久化服务（路径/备份/落盘）、集成点（标签页入口）。
+
+摘要模式时序：生成→解析→预览→冲突处理→备份→写入→刷新下拉。矩阵维度时序：生成→解析→预览（可选择）→合并/另存→备份→写入。
+
+## 4. 数据模型与约束
+摘要模式 JSON：mode_key（英文 snake_case）、description、yes_no_questions[]、open_questions[]；各题含 key/question/column_name，长度范围约束（yes_no 3-6/open 2-4，可配置）。
+
+矩阵维度 YAML：type ∈ {text, yes_no, single_choice, multiple_choice, number, rating, list}；选择题 options≥2；rating.scale ∈[2,10]；list.separator 必填；key 英文 snake_case；question/column_name 为目标语言。
+
+## 5. 提示词契约
+仅输出结构化 JSON/YAML，不要 markdown 包裹或解释；支持 ```json/```yaml 包裹时的清洗；语言通过 `{language}` 控制题面。
+
+## 6. UX 细节（PyQt6）
+预览支持复制/导出与（后续）语法高亮；冲突对话框提供覆盖/重命名/取消；提供描述示例与历史记录；加载指示/可取消/超时重试。
+
+## 7. 打包与分发
+PyInstaller 收集 prompts 目录；冻结写入 `~/.litrx/`；使用 `resource_path()` 访问资源。
+
+## 8. 测试计划（要点）
+生成器：Mock AIClient 返回 choices.message.content；覆盖正常/包裹/结构缺失/越界。持久化：路径/冲突/备份/回滚。对话框：主流程与错误分支。
+
+---
+
+## 9. 非目标（Non-goals）
+- 不从现有 CSV/XLSX/PDF 自动“学习”并反推题目/维度（避免隐私与复杂度）
+- 不直接在线更新远程配置中心（仅本地文件）
+- 不做多模型对比/自动选择（沿用现有 AIClient 配置）
+
+## 10. 验收标准（Acceptance Criteria）
+- 摘要助手：描述→生成→预览→冲突处理→备份→写入→模式下拉刷新并选中新项
+- 矩阵助手：描述→生成→预览（可勾选）→应用/另存→备份→写入→在 Matrix Tab 可见
+- prompts 经 `resource_path()` 可读；打包后 `.exe/.app` 正常生成配置
+- GPT‑5/o* 等模型调用不因 `temperature` 出错；日志仅首次提示一次
+- i18n 支持中/英完整文案；错误路径均有可读提示与重试选项
+
+## 11. 生成器 API 草案（稳定接口）
+```python
+# litrx/ai_config_generator.py
+class AbstractModeGenerator:
+    def __init__(self, config: dict): ...
+    def generate_mode(self, description: str, language: str = "zh") -> dict: ...
+
+class MatrixDimensionGenerator:
+    def __init__(self, config: dict): ...
+    def generate_dimensions(self, description: str, language: str = "zh") -> list[dict]: ...
+```
+
+## 12. JSON/YAML Schema（参考）
+摘要模式（JSON Schema 摘要）：
+```json
+{
+  "type": "object",
+  "required": ["mode_key", "description", "yes_no_questions", "open_questions"],
+  "properties": {
+    "mode_key": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,49}$"},
+    "description": {"type": "string", "minLength": 1},
+    "yes_no_questions": {
+      "type": "array", "minItems": 3, "maxItems": 6,
+      "items": {"type": "object", "required": ["key","question","column_name"]}
+    },
+    "open_questions": {
+      "type": "array", "minItems": 2, "maxItems": 4,
+      "items": {"type": "object", "required": ["key","question","column_name"]}
+    }
+  }
+}
+```
+
+矩阵维度（YAML 结构约束摘要）：
+- 每项必须包含 `type|key|question|column_name`
+- `type` ∈ {text, yes_no, single_choice, multiple_choice, number, rating, list}
+- single/multiple_choice: `options`（≥2）
+- rating: `scale` ∈ [2,10]
+- list: `separator` 必填
+- `key` 英文 snake_case；`question/column_name` 为目标语言
+
+## 13. 迭代路线（后续）
+- 对话框预览增加 JSON/YAML 语法高亮与结构视图
+- 维度 preset 管理（增/删/改/切换）统一化
+- prompts 模板自动化 A/B 评估与优化
+
 
 #### 2.3.1 摘要筛选模式生成
 
-**输入**：用户的自然语言描述
+**输入**：用户的自然语言描述（中文/英文）；语言选择通过 GUI 传入 `language`
 
-**输出**：JSON 格式的模式配置
+**输出**：JSON 格式的模式配置（严格结构，见下）
 ```json
 {
   "mode_key": "user_generated_mode_1",
@@ -179,9 +296,9 @@
 
 #### 2.3.2 文献矩阵维度生成
 
-**输入**：用户的自然语言描述
+**输入**：用户的自然语言描述（中文/英文）；语言选择通过 GUI 传入 `language`
 
-**输出**：YAML 格式的维度配置列表
+**输出**：YAML 格式的维度配置列表（严格结构，见下）
 ```yaml
 dimensions:
   - type: single_choice

@@ -1,202 +1,144 @@
-# LitRelevanceAI Architecture
+# LitRelevanceAI Architecture (PyQt6)
 
 ## Overview
 
-LitRelevanceAI is a literature analysis tool that uses AI to assist researchers in screening and analyzing academic papers. The application supports multiple AI providers (OpenAI, Google Gemini, and SiliconFlow) and provides both CLI and GUI interfaces.
+LitRelevanceAI is an AI-assisted toolkit for screening and analyzing academic literature. It supports CLI and a modern PyQt6 GUI, with OpenAI-compatible providers (OpenAI and SiliconFlow). The codebase emphasizes modular analysis pipelines, internationalization (i18n), and robust configuration management. Packaging scripts enable click-to-run apps for non-developers.
 
 ## Project Structure
 
 ```
 LitRelevanceAI/
-├── litrx/                      # Main package
-│   ├── __init__.py             # Package initialization
-│   ├── __main__.py             # Entry point for `python -m litrx`
-│   ├── cli.py                  # Command-line interface
-│   ├── config.py               # Configuration management
-│   ├── i18n.py                 # Internationalization support
-│   ├── ai_client.py            # AI service wrapper (LiteLLM)
-│   ├── csv_analyzer.py         # CSV relevance analysis
-│   ├── abstract_screener.py    # Abstract/title screening
-│   ├── pdf_screener.py         # PDF document screening
-│   └── gui/                    # GUI components
-│       ├── base_window.py      # Base window with shared controls
-│       ├── main_window.py      # Main application window
-│       └── tabs/               # Feature tabs
-│           ├── csv_tab.py      # CSV analysis tab
-│           ├── abstract_tab.py # Abstract screening tab
-│           └── pdf_tab.py      # PDF screening tab
-├── configs/                    # Configuration files
-│   ├── config.yaml             # Default AI service configuration
-│   └── questions/              # Question templates
-│       ├── abstract.yaml
-│       ├── csv.yaml
-│       └── pdf.yaml
-├── tests/                      # Unit tests
-├── docs/                       # Documentation
-└── run_gui.py                  # GUI launcher script
+├── litrx/
+│   ├── __init__.py
+│   ├── __main__.py                 # `python -m litrx` (delegates to CLI or GUI)
+│   ├── cli.py                      # CLI dispatcher (csv / abstract / matrix)
+│   ├── ai_client.py                # OpenAI SDK wrapper (OpenAI & SiliconFlow)
+│   ├── config.py                   # Cascading configuration
+│   ├── i18n.py                     # Translations + observer pattern
+│   ├── resources.py                # resource_path() for frozen builds
+│   ├── csv_analyzer.py             # CSV relevance analysis
+│   ├── abstract_screener.py        # Title/abstract screening + verification
+│   ├── matrix_analyzer.py          # Literature matrix analysis from PDFs
+│   └── gui/
+│       ├── base_window_qt.py       # PyQt6 base window (+ onboarding)
+│       ├── main_window_qt.py       # PyQt6 main window
+│       └── tabs_qt/
+│           ├── csv_tab.py          # CSV analysis tab (auto-save)
+│           ├── abstract_tab.py     # Abstract screening tab (auto-save)
+│           └── matrix_tab.py       # Matrix analysis tab
+├── configs/                        # Default YAML + question templates
+├── prompts_config.json             # Prompt templates
+├── questions_config.json           # Screening modes and questions
+├── packaging/
+│   ├── build_win.bat               # Windows PyInstaller build script
+│   ├── build_mac.sh                # macOS PyInstaller build script
+│   └── pyinstaller/litrx.spec      # Spec file (bundles resources)
+├── docs/                           # Documentation
+├── tests/                          # Unit tests (minimal)
+└── run_gui.py                      # GUI launcher (PyQt6-only)
 ```
 
 ## Key Components
 
-### 1. Internationalization (i18n)
+### Internationalization (i18n)
 
-**Location:** `litrx/i18n.py`
+Location: `litrx/i18n.py`
+- Translations in zh/en via a dictionary
+- Global instance via `get_i18n()` and shorthand `t(key)`
+- Observer pattern to notify UI widgets on language changes
 
-The i18n module provides language support for Chinese and English. It uses a simple translation dictionary pattern with an observer pattern for dynamic UI updates.
+Language change flow:
+1. User selects language in GUI
+2. `BaseWindow._on_language_changed()` updates base UI
+3. `LitRxApp._on_language_changed()` updates tab labels
+4. Tabs implement `update_language()` when needed
 
-**Features:**
-- Translation dictionary for zh (Chinese) and en (English)
-- Global i18n instance accessible via `get_i18n()`
-- Shorthand function `t(key)` for translations
-- Observer pattern to notify UI components when language changes
-- Persistent language preference stored in configuration
+### Configuration Management
 
-**Usage Example:**
-```python
-from litrx.i18n import get_i18n, t
+Location: `litrx/config.py`
+Cascade order (low → high):
+1. `DEFAULT_CONFIG` in code
+2. `configs/config.yaml`
+3. `~/.litrx_gui.yaml` (persisted GUI settings)
+4. `.env`
+5. Runtime/CLI flags
 
-# Get translation
-title = t("app_title")  # Returns translated text based on current language
+Common keys: `AI_SERVICE`, `MODEL_NAME`, `OPENAI_API_KEY`, `SILICONFLOW_API_KEY`, `API_BASE`, `LANGUAGE`, `ENABLE_VERIFICATION`, `OUTPUT_FILE_SUFFIX`.
 
-# Change language
-i18n = get_i18n()
-i18n.current_language = "en"  # Switch to English
+### AI Client
 
-# Register observer for language changes
-def on_language_change():
-    update_ui()
+Location: `litrx/ai_client.py`
+- Uses the official OpenAI SDK; SiliconFlow via OpenAI-compatible base_url
+- Model capability heuristics cached at init (e.g., GPT‑5/o* often disallow custom `temperature`)
+- Request layer auto-sanitizes unsupported params and has a targeted retry without `temperature` if needed
 
-i18n.add_observer(on_language_change)
-```
+### GUI Architecture (PyQt6)
 
-### 2. Configuration Management
+Base window (Location: `litrx/gui/base_window_qt.py`):
+- Config panel (provider, key, model, language)
+- Prompt settings dialog
+- First-run onboarding wizard to collect provider + API key
+- Keyring integration (if available)
+- `resource_path()` for bundled files in frozen builds
 
-**Location:** `litrx/config.py`
+Tabs (Location: `litrx/gui/tabs_qt/`):
+- `csv_tab.py`: CSV relevance analysis with progress and auto-save to `<name>_analyzed_<timestamp>.csv`
+- `abstract_tab.py`: Abstract screening (open + yes/no) with optional verification and auto-save; supports Zotero headers (`Abstract Note`, `Short Title`)
+- `matrix_tab.py`: PDF-driven matrix analysis with flexible dimensions (see `configs/matrix/`)
 
-Handles cascading configuration from multiple sources:
-1. Default configuration (`config.yaml`)
-2. User-persisted configuration (`~/.litrx_gui.yaml`)
-3. Environment variables (highest priority)
-4. Runtime parameters
+Signals/threads: worker threads emit signals; UI updates occur in main thread slots.
 
-**Configuration Keys:**
-- `AI_SERVICE`: "openai", "gemini", or "siliconflow"
-- `MODEL_NAME`: Model identifier
-- `OPENAI_API_KEY`, `GEMINI_API_KEY`, `SILICONFLOW_API_KEY`: API credentials
-- `API_BASE`: Custom API endpoint (optional)
-- `LANGUAGE`: UI language preference ("zh" or "en")
+### Resource Handling
 
-### 3. AI Client
-
-**Location:** `litrx/ai_client.py`
-
-Wraps LiteLLM to provide a unified interface for multiple AI providers.
-
-**Supported Providers:**
-- OpenAI (GPT-4, GPT-4o, etc.)
-- Google Gemini (gemini-1.5-pro, etc.)
-- SiliconFlow (various models)
-
-### 4. GUI Architecture
-
-**Base Window Pattern:**
-
-The GUI uses a base window pattern where `BaseWindow` provides common functionality:
-- Configuration controls (AI service, API key, model)
-- Language selector
-- Prompt settings editor
-- Configuration persistence
-- Notebook (tab) container
-
-**Tab Pattern:**
-
-Each feature is implemented as a separate tab class:
-- `CsvTab`: CSV relevance analysis
-- `AbstractTab`: Abstract screening with verification
-- `PdfTab`: PDF document screening
-
-**Language Update Flow:**
-
-1. User selects new language from dropdown
-2. `BaseWindow.on_language_change()` updates i18n instance
-3. i18n notifies all observers via `_notify_observers()`
-4. `BaseWindow._on_language_changed()` updates base UI elements
-5. `LitRxApp._on_language_changed()` (override) updates tab labels
-6. Individual tabs update their UI via `update_language()` method (if implemented)
-
-## Design Patterns
-
-### 1. Observer Pattern (Language Changes)
-
-The i18n system uses the observer pattern to notify UI components when the language changes. This allows for dynamic UI updates without tight coupling.
-
-### 2. Template Method (Base Window)
-
-`BaseWindow` provides template methods that subclasses can override:
-- `_on_language_changed()`: Called when language changes
-- `build_config()`: Build configuration dictionary
-
-### 3. Dependency Injection (Tabs)
-
-Tabs receive the parent `BaseWindow` instance in their constructor, allowing them to access shared resources like configuration and file dialogs.
+Location: `litrx/resources.py`
+- `resource_path(*parts)` resolves to PyInstaller `_MEIPASS` in frozen builds, or repository root in dev.
+- All modules that read resources (configs, prompts, questions) use `resource_path()`.
 
 ## Best Practices
 
-### Adding New Translations
+Adding translations:
+1. Add keys to both zh and en in `i18n.py`
+2. Use `t(key)` in UI code
+3. Register `update_language()` in tabs that have translatable widgets
 
-1. Add translation keys to both "zh" and "en" dictionaries in `litrx/i18n.py`
-2. Use `t(key)` function to access translations in code
-3. Store references to UI widgets that need updating
-4. Implement `update_language()` method in tabs if needed
+Adding config keys:
+1. Add defaults in `config.py` or module-level `DEFAULT_CONFIG`
+2. Persist in `base_window_qt.py` if GUI-exposed
 
-### Adding New Configuration Keys
+Adding features:
+1. Implement logic in a dedicated module (e.g., `my_feature.py`)
+2. Add a PyQt6 tab under `gui/tabs_qt/`
+3. Register the tab in `main_window_qt.py`
+4. Add translations in `i18n.py`
 
-1. Add default value to `DEFAULT_CONFIG` in `litrx/config.py`
-2. Update `save_config()` in `base_window.py` to persist the key
-3. Update `build_config()` to include the key in runtime config
+## Configuration & Templates
 
-### Adding New Features
-
-1. Create a new tab class in `litrx/gui/tabs/`
-2. Add tab instantiation in `LitRxApp.__init__()`
-3. Add translation keys for the tab
-4. Implement core logic in a separate module (e.g., `csv_analyzer.py`)
-
-## Configuration Files
-
-### questions_config.json
-
-Defines screening modes with customizable questions:
-- `weekly_screening`: Quick analysis with yes/no questions
-- `detailed_analysis`: In-depth analysis with open-ended questions
-- Custom modes can be added via GUI
-
-### prompts_config.json
-
-Contains AI prompt templates for different analysis types:
-- `csv_analysis.main_prompt`: CSV relevance scoring
-- `abstract_screening.detailed_prompt`: Detailed abstract analysis
-- `abstract_screening.quick_prompt`: Quick weekly screening
-- `abstract_screening.verification_prompt`: Answer verification
-- `pdf_screening.main_prompt`: PDF document analysis
-
-All prompts are editable via the GUI prompt settings dialog.
+- `questions_config.json`: screening modes and questions (GUI can add/edit modes)
+- `prompts_config.json`: prompt templates; editable via GUI
+- `configs/config.yaml`: base defaults for the GUI; merged with persisted and env values
 
 ## Testing
 
-Tests are located in the `tests/` directory:
-- `test_abstract_verification.py`: Tests for abstract verification workflow
+Tests live under `tests/` (currently minimal). Run with:
 
-Run tests with:
 ```bash
 pytest tests/
 ```
 
-## Future Enhancements
+## Packaging & Distribution
 
-1. **Complete Tab Internationalization**: Add `update_language()` methods to all tabs
-2. **Configuration Validation**: Add schema validation for config files
-3. **Plugin System**: Allow users to add custom screening modes
-4. **Batch Processing**: Parallel processing for large datasets
-5. **Result Caching**: Cache AI responses to reduce API costs
-6. **Export Templates**: Customizable export formats
+Use PyInstaller for click-to-run builds:
+- Windows: `packaging\build_win.bat`
+- macOS: `bash packaging/build_mac.sh`
+
+Outputs:
+- Windows: `dist/LitRelevanceAI/LitRelevanceAI.exe` (ship the whole folder)
+- macOS: `dist/LitRelevanceAI.app`
+
+The spec bundles `configs/`, `questions_config.json`, `prompts_config.json`. All resource access goes through `resource_path()`.
+
+## Notable Behaviors
+
+- Zotero columns: title detection includes `Short Title`; abstract includes `Abstract Note`
+- Auto-save: Abstract/CSV tabs auto-save results to the input folder on completion
+- Temperature handling: for GPT‑5/o* families, client strips `temperature` automatically and logs once per session
