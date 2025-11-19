@@ -48,6 +48,7 @@ from .config import (
 )
 from .ai_client import AIClient
 from .constants import TITLE_SIMILARITY_THRESHOLD, FUZZY_MATCH_MIN_SCORE
+from .exceptions import FileProcessingError
 from .logging_config import get_logger
 from .utils import AIResponseParser
 from .resources import resource_path
@@ -601,8 +602,10 @@ Example:
 
     # Validate inputs
     if not os.path.isdir(args.pdf_folder):
-        logger.error(f"错误：PDF文件夹不存在: {args.pdf_folder}")
-        sys.exit(1)
+        raise FileProcessingError(
+            f"PDF文件夹不存在: {args.pdf_folder}",
+            help_text="请检查路径是否正确，或使用绝对路径。"
+        )
 
     # Process
     logger.info("开始处理文献矩阵分析...")
@@ -632,7 +635,7 @@ Example:
         logger.error(f"\n✗ 处理失败: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        raise  # Re-raise the exception for the caller to handle
 
 
 if __name__ == '__main__':
