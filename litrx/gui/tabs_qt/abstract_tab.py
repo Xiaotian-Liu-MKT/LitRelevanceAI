@@ -112,24 +112,34 @@ class AbstractScreeningWorker(QThread):
             screener = AbstractScreener(self.config)
 
             # Define progress callback that emits signals
-            def progress_callback(index: int, total: int, result: Optional[dict]) -> None:
-                """Called by screener for each completed article."""
+            def progress_callback(completed_count: int, total: int, result: Optional[dict]) -> None:
+                """Called by screener for each completed article.
+
+                Args:
+                    completed_count: Number of articles completed so far (1-based)
+                    total: Total number of articles to process
+                    result: Result dictionary containing 'index' and analysis results
+                """
                 # Check if cancelled
                 if self.stop_event.is_set():
                     return
 
+                # Get index from result for row-specific operations
+                index = result.get('index', 0) if result else 0
+
                 # Get title for logging
                 title = str(df.iloc[index].get(title_col, '')) if index < len(df) else ''
 
-                # Update UI
-                self.update_progress.emit((index + 1) / total * 100)
-                self.update_status.emit(f"Completed {index + 1}/{total}: {title[:50]}...")
-                self.append_log.emit(f"✓ [{index + 1}/{total}] {title[:50]}...")
+                # Update UI - use completed_count for accurate progress
+                self.update_progress.emit(completed_count / total * 100)
+                self.update_status.emit(f"Completed {completed_count}/{total}: {title[:50]}...")
+                self.append_log.emit(f"✓ [{completed_count}/{total}] {title[:50]}...")
 
-                # Add result row to table
-                status = "Completed" if result else "Skipped"
-                summary = "Analyzed" if result else "N/A"
-                self.add_result_row.emit(index, title[:100], status, summary)
+                # Add result row to table - use completed_count for sequential row numbers
+                status = "Completed" if result and result.get('initial') else "Skipped"
+                summary = "Analyzed" if result and result.get('initial') else "N/A"
+                # Use completed_count - 1 for 0-based row index in results table
+                self.add_result_row.emit(completed_count - 1, title[:100], status, summary)
 
             # Process batch concurrently
             try:
