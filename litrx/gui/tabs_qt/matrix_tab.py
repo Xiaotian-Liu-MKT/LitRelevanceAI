@@ -30,11 +30,14 @@ from ...matrix_analyzer import (
     save_results,
 )
 from ...i18n import get_i18n, t
+from ...logging_config import get_logger
 from ..dialogs_qt.ai_matrix_assistant_qt import AIMatrixAssistantDialog
 from ..dialogs_qt.dimensions_editor_qt_v2 import DimensionsEditorDialog
 
 if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
+
+logger = get_logger(__name__)
 
 
 class MatrixAnalysisWorker(QThread):
@@ -140,34 +143,34 @@ class MatrixTab(QWidget):
         layout.setSpacing(10)
 
         # Configuration Section
-        config_group = QGroupBox("矩阵配置 / Matrix Configuration")
+        config_group = QGroupBox(t("matrix_config"))
         config_layout = QVBoxLayout()
 
-        self.dim_count_label = QLabel("当前维度数：0 / Current Dimensions: 0")
+        self.dim_count_label = QLabel(t("current_dimensions", count=0))
         config_layout.addWidget(self.dim_count_label)
 
         btn_layout = QHBoxLayout()
-        self.edit_dim_btn = QPushButton("✏️ 编辑维度 / Edit Dimensions")
+        self.edit_dim_btn = QPushButton(f"✏️ {t('edit_dimensions')}")
         self.edit_dim_btn.clicked.connect(self._open_dimensions_editor)
         btn_layout.addWidget(self.edit_dim_btn)
 
-        self.ai_dims_btn = QPushButton("🤖 AI 生成维度 / AI Dims")
+        self.ai_dims_btn = QPushButton(f"🤖 {t('ai_generate_dims')}")
         self.ai_dims_btn.clicked.connect(self._open_ai_dims)
         btn_layout.addWidget(self.ai_dims_btn)
 
-        self.import_config_btn = QPushButton("📥 导入配置 / Import Config")
+        self.import_config_btn = QPushButton(f"📥 {t('import_config')}")
         self.import_config_btn.clicked.connect(self._import_config)
         btn_layout.addWidget(self.import_config_btn)
 
-        self.export_config_btn = QPushButton("📤 导出配置 / Export Config")
+        self.export_config_btn = QPushButton(f"📤 {t('export_config')}")
         self.export_config_btn.clicked.connect(self._export_config)
         btn_layout.addWidget(self.export_config_btn)
 
-        self.save_preset_btn = QPushButton("💾 另存为 Preset / Save as Preset")
+        self.save_preset_btn = QPushButton(f"💾 {t('save_preset')}")
         self.save_preset_btn.clicked.connect(self._save_as_preset)
         btn_layout.addWidget(self.save_preset_btn)
 
-        self.reset_btn = QPushButton("🔄 重置默认 / Reset Default")
+        self.reset_btn = QPushButton(f"🔄 {t('reset_default')}")
         self.reset_btn.clicked.connect(self._reset_config)
         btn_layout.addWidget(self.reset_btn)
 
@@ -176,46 +179,46 @@ class MatrixTab(QWidget):
         layout.addWidget(config_group)
 
         # Data Input Section
-        input_group = QGroupBox("数据输入 / Data Input")
+        input_group = QGroupBox(t("data_input"))
         input_layout = QVBoxLayout()
 
         # PDF folder
-        folder_label = QLabel("PDF文件夹* / PDF Folder*:")
-        input_layout.addWidget(folder_label)
+        self.folder_label = QLabel(t("pdf_folder_required"))
+        input_layout.addWidget(self.folder_label)
 
         folder_layout = QHBoxLayout()
         self.folder_entry = QLineEdit()
         folder_layout.addWidget(self.folder_entry)
 
-        self.browse_folder_btn = QPushButton("浏览 / Browse")
+        self.browse_folder_btn = QPushButton(t("browse"))
         self.browse_folder_btn.clicked.connect(self._browse_folder)
         folder_layout.addWidget(self.browse_folder_btn)
 
         input_layout.addLayout(folder_layout)
 
         # Metadata file
-        meta_label = QLabel("元数据文件（可选）/ Metadata File (Optional):")
-        input_layout.addWidget(meta_label)
+        self.meta_label = QLabel(t("metadata_file_optional"))
+        input_layout.addWidget(self.meta_label)
 
         meta_layout = QHBoxLayout()
         self.meta_entry = QLineEdit()
         meta_layout.addWidget(self.meta_entry)
 
-        self.browse_meta_btn = QPushButton("浏览 / Browse")
+        self.browse_meta_btn = QPushButton(t("browse"))
         self.browse_meta_btn.clicked.connect(self._browse_meta)
         meta_layout.addWidget(self.browse_meta_btn)
 
         input_layout.addLayout(meta_layout)
 
         # Output file
-        output_label = QLabel("输出文件* / Output File*:")
-        input_layout.addWidget(output_label)
+        self.output_label = QLabel(t("output_file_required"))
+        input_layout.addWidget(self.output_label)
 
         output_layout = QHBoxLayout()
         self.output_entry = QLineEdit()
         output_layout.addWidget(self.output_entry)
 
-        self.browse_output_btn = QPushButton("保存为 / Save As")
+        self.browse_output_btn = QPushButton(t("browse"))
         self.browse_output_btn.clicked.connect(self._browse_output)
         output_layout.addWidget(self.browse_output_btn)
 
@@ -226,11 +229,11 @@ class MatrixTab(QWidget):
 
         # Action buttons
         action_layout = QHBoxLayout()
-        self.start_btn = QPushButton("🚀 开始分析 / Start Analysis")
+        self.start_btn = QPushButton(f"🚀 {t('start_analysis')}")
         self.start_btn.clicked.connect(self.start_analysis)
         action_layout.addWidget(self.start_btn)
 
-        self.stop_btn = QPushButton("⏹️ 停止 / Stop")
+        self.stop_btn = QPushButton(f"⏹️ {t('stop')}")
         self.stop_btn.clicked.connect(self.stop_analysis)
         self.stop_btn.setEnabled(False)
         action_layout.addWidget(self.stop_btn)
@@ -244,8 +247,8 @@ class MatrixTab(QWidget):
         layout.addWidget(self.progress_bar)
 
         # Log
-        log_label = QLabel("处理日志 / Processing Log:")
-        layout.addWidget(log_label)
+        self.log_label = QLabel(t("processing_log"))
+        layout.addWidget(self.log_label)
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
@@ -260,23 +263,47 @@ class MatrixTab(QWidget):
 
     def update_language(self) -> None:
         """Update UI text when language changes."""
-        # Matrix tab labels are currently bilingual, so minimal updates needed
-        pass
+        # Update dimension count label
+        dim_count = len(self.matrix_config.get("dimensions", []))
+        self.dim_count_label.setText(t("current_dimensions", count=dim_count))
+
+        # Update buttons
+        self.edit_dim_btn.setText(f"✏️ {t('edit_dimensions')}")
+        self.ai_dims_btn.setText(f"🤖 {t('ai_generate_dims')}")
+        self.import_config_btn.setText(f"📥 {t('import_config')}")
+        self.export_config_btn.setText(f"📤 {t('export_config')}")
+        self.save_preset_btn.setText(f"💾 {t('save_preset')}")
+        self.reset_btn.setText(f"🔄 {t('reset_default')}")
+
+        # Update labels
+        self.folder_label.setText(t("pdf_folder_required"))
+        self.meta_label.setText(t("metadata_file_optional"))
+        self.output_label.setText(t("output_file_required"))
+
+        # Update action buttons
+        self.start_btn.setText(f"🚀 {t('start_analysis')}")
+        self.stop_btn.setText(f"⏹️ {t('stop')}")
+        self.browse_folder_btn.setText(t("browse"))
+        self.browse_meta_btn.setText(t("browse"))
+        self.browse_output_btn.setText(t("browse"))
+
+        # Update log label
+        self.log_label.setText(t("processing_log"))
 
     def _load_default_config(self) -> None:
         """Load default matrix configuration."""
         try:
             self.matrix_config = load_matrix_config(str(self.default_config_path))
             dim_count = len(self.matrix_config.get("dimensions", []))
-            self.dim_count_label.setText(f"当前维度数：{dim_count} / Current Dimensions: {dim_count}")
+            self.dim_count_label.setText(t("current_dimensions", count=dim_count))
         except Exception as e:
-            self.append_log_signal.emit(f"Failed to load default config: {e}")
+            logger.warning(f"Failed to load default config: {e}")
 
     def _import_config(self) -> None:
         """Import matrix configuration from file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Import Config",
+            t("import_config"),
             "",
             "YAML (*.yaml *.yml)"
         )
@@ -284,16 +311,16 @@ class MatrixTab(QWidget):
             try:
                 self.matrix_config = load_matrix_config(file_path)
                 dim_count = len(self.matrix_config.get("dimensions", []))
-                self.dim_count_label.setText(f"当前维度数：{dim_count} / Current Dimensions: {dim_count}")
-                QMessageBox.information(self, "Success", "Configuration imported successfully!")
+                self.dim_count_label.setText(t("current_dimensions", count=dim_count))
+                QMessageBox.information(self, t("success"), t("saved"))
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to import config: {e}")
+                QMessageBox.critical(self, t("error"), str(e))
 
     def _export_config(self) -> None:
         """Export current matrix configuration."""
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Config",
+            t("export_config"),
             "",
             "YAML (*.yaml)"
         )
@@ -301,16 +328,16 @@ class MatrixTab(QWidget):
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     yaml.safe_dump(self.matrix_config, f, allow_unicode=True)
-                QMessageBox.information(self, "Success", "Configuration exported successfully!")
+                QMessageBox.information(self, t("success"), t("saved"))
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to export config: {e}")
+                QMessageBox.critical(self, t("error"), str(e))
 
     def _reset_config(self) -> None:
         """Reset to default configuration."""
         reply = QMessageBox.question(
             self,
-            "Confirm Reset",
-            "Are you sure you want to reset to default configuration?",
+            t("confirm"),
+            t("reset_prompt_confirm"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -322,7 +349,7 @@ class MatrixTab(QWidget):
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             self.matrix_config = dlg.result
             dim_count = len(self.matrix_config.get("dimensions", []))
-            self.dim_count_label.setText(f"当前维度数：{dim_count} / Current Dimensions: {dim_count}")
+            self.dim_count_label.setText(t("current_dimensions", count=dim_count))
 
     def _save_as_preset(self) -> None:
         """Save current config as a preset YAML file."""
@@ -354,11 +381,11 @@ class MatrixTab(QWidget):
             dims.extend(dlg.result)
             self.matrix_config['dimensions'] = dims
             dim_count = len(self.matrix_config.get("dimensions", []))
-            self.dim_count_label.setText(f"当前维度数：{dim_count} / Current Dimensions: {dim_count}")
+            self.dim_count_label.setText(t("current_dimensions", count=dim_count))
 
     def _browse_folder(self) -> None:
         """Browse for PDF folder."""
-        folder_path = QFileDialog.getExistingDirectory(self, "Select PDF Folder")
+        folder_path = QFileDialog.getExistingDirectory(self, t("browse"))
         if folder_path:
             self.folder_entry.setText(folder_path)
 
@@ -366,7 +393,7 @@ class MatrixTab(QWidget):
         """Browse for metadata file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Metadata File",
+            t("browse"),
             "",
             "CSV or Excel (*.csv *.xlsx)"
         )
@@ -377,7 +404,7 @@ class MatrixTab(QWidget):
         """Browse for output file."""
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Output As",
+            t("browse"),
             "",
             "Excel (*.xlsx)"
         )
@@ -390,7 +417,7 @@ class MatrixTab(QWidget):
         output_file = self.output_entry.text().strip()
 
         if not pdf_folder or not output_file:
-            QMessageBox.critical(self, "Error", "Please specify PDF folder and output file!")
+            QMessageBox.critical(self, t("error"), t("error_fill_fields"))
             return
 
         # Initialize UI
