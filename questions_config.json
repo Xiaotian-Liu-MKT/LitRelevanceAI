@@ -3,14 +3,14 @@
     "description": "每周文献快速筛选",
     "open_questions": [
       {
-        "key": "research_area",
-        "question": "这篇文献的主要研究领域是什么？",
-        "column_name": "研究领域"
+        "key": "summary",
+        "question": "这篇文献主要研究了什么问题？主要发现是什么？",
+        "column_name": "总结"
       },
       {
-        "key": "methodology",
-        "question": "研究使用了什么主要方法？",
-        "column_name": "研究方法"
+        "key": " focus",
+        "question": "研究的主要对象和情境是什么?",
+        "column_name": "研究重点"
       }
     ],
     "yes_no_questions": [

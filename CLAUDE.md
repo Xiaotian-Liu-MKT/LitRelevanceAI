@@ -11,12 +11,12 @@ This document provides comprehensive guidance for AI assistants (like Claude Cod
 - **Abstract Screening**: Configurable yes/no criteria and open questions with optional verification workflow
 - **Literature Matrix Analysis**: Structured data extraction with 7 question types (text, yes_no, single_choice, multiple_choice, number, rating, list)
 - **PDF Screening**: Legacy full-text analysis (superseded by matrix analyzer)
-- **Bilingual GUI**: Tkinter interface with Chinese/English support
+- **Bilingual GUI**: PyQt6 interface with Chinese/English support
 
 ### Technology Stack
 - **Language**: Python 3.8+
 - **AI Provider**: OpenAI SDK (supports OpenAI and SiliconFlow APIs)
-- **GUI**: Tkinter (standard library)
+- **GUI**: PyQt6
 - **Data**: pandas, openpyxl
 - **PDF**: pypdf
 - **Config**: YAML, JSON, .env files
@@ -37,10 +37,10 @@ LitRelevanceAI/
 │   ├── abstract_screener.py        # Title/abstract screening with verification
 │   ├── pdf_screener.py             # PDF analysis (LEGACY - use matrix_analyzer)
 │   ├── matrix_analyzer.py          # Literature matrix analysis (NEW)
-│   └── gui/                        # Tkinter GUI components
-│       ├── base_window.py          # BaseWindow class with shared controls
-│       ├── main_window.py          # LitRxApp - main application window
-│       ├── tabs/                   # Feature tabs
+│   └── gui/                        # PyQt6 GUI components
+│       ├── base_window_qt.py       # BaseWindow (Qt) class with shared controls
+│       ├── main_window_qt.py       # LitRxApp (Qt) - main application window
+│       ├── tabs_qt/                # Feature tabs (Qt)
 │       │   ├── csv_tab.py          # CSV analysis tab
 │       │   ├── abstract_tab.py     # Abstract screening tab
 │       │   ├── matrix_tab.py       # Literature matrix tab (NEW)
@@ -88,14 +88,32 @@ cp .env.example .env
 python -m litrx --help
 litrx --help  # Should work if installed correctly
 
-# 4. Launch GUI
-python run_gui.py  # Auto-installs dependencies
+# 4. Launch PyQt6 GUI
+python run_gui.py  # Auto-installs dependencies (incl. PyQt6)
 ```
 
 ### Running Tests
 ```bash
 pytest tests/  # Currently minimal test coverage
 ```
+
+## Packaging for Distribution
+
+Two recommended paths to ship a clickable app:
+
+- PyInstaller (recommended)
+  - Windows: run `packaging\build_win.bat`
+  - macOS: run `bash packaging/build_mac.sh`
+  - Outputs:
+    - Windows: `dist/LitRelevanceAI/LitRelevanceAI.exe` (ship the whole folder)
+    - macOS: `dist/LitRelevanceAI.app`
+  - The code uses `litrx.resources.resource_path()` to load bundled files (`configs/`, `questions_config.json`, `prompts_config.json`) in frozen builds.
+
+- Nuitka/Briefcase (advanced)
+  - Possible alternatives for performance or native installers; require extra setup.
+
+First-Run Onboarding
+- On first launch, the GUI shows a minimal wizard to select provider (OpenAI/SiliconFlow) and enter API key, with an option to save to keyring and config.
 
 ## Architecture Patterns
 
@@ -130,7 +148,7 @@ i18n.add_observer(on_language_change)
 
 ### 2. Template Method Pattern (BaseWindow)
 
-**Location**: `litrx/gui/base_window.py`
+**Location**: `litrx/gui/base_window_qt.py`
 
 Base class for GUI windows with overridable hooks:
 
@@ -155,23 +173,30 @@ class MyWindow(BaseWindow):
 - Config persistence to `~/.litrx_gui.yaml`
 - Tab container (Notebook)
 
-### 3. Dependency Injection (GUI Tabs)
+### 3. Dependency Injection (GUI Tabs - Qt)
 
-**Location**: `litrx/gui/tabs/*.py`
+**Location**: `litrx/gui/tabs_qt/*.py`
 
 Tabs receive parent BaseWindow and access shared resources:
 
 ```python
-class MyTab(ttk.Frame):
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from litrx.gui.base_window_qt import BaseWindow
+from litrx.i18n import t, get_i18n
+
+class MyTab(QWidget):
     def __init__(self, parent: BaseWindow):
-        super().__init__(parent.notebook)
+        super().__init__()
         self.parent = parent
 
-        # Access shared configuration
-        config = parent.build_config()
+        layout = QVBoxLayout(self)
+        self.title_label = QLabel(t("my_tab_title"))
+        layout.addWidget(self.title_label)
 
-        # Use shared AI client
-        client = AIClient(config["AI_SERVICE"], config)
+        get_i18n().add_observer(self.update_language)
+
+    def update_language(self):
+        self.title_label.setText(t("my_tab_title"))
 ```
 
 ### 4. Cascading Configuration
@@ -192,34 +217,27 @@ Configuration priority (low to high):
 
 ## Common Development Workflows
 
-### Adding a New GUI Tab
+### Adding a New GUI Tab (Qt)
 
-1. **Create tab class** in `litrx/gui/tabs/my_tab.py`:
+1. **Create tab class** in `litrx/gui/tabs_qt/my_tab.py`:
 ```python
-import tkinter as tk
-from tkinter import ttk
-from litrx.gui.base_window import BaseWindow
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from litrx.gui.base_window_qt import BaseWindow
 from litrx.i18n import t, get_i18n
 
-class MyTab(ttk.Frame):
+class MyTab(QWidget):
     def __init__(self, parent: BaseWindow):
-        super().__init__(parent.notebook)
+        super().__init__()
         self.parent = parent
 
-        # Build UI
-        self.build_ui()
+        layout = QVBoxLayout(self)
+        self.title_label = QLabel(t("my_tab_title"))
+        layout.addWidget(self.title_label)
 
-        # Register language observer
         get_i18n().add_observer(self.update_language)
 
-    def build_ui(self):
-        # Create widgets using t() for translations
-        self.title_label = ttk.Label(self, text=t("my_tab_title"))
-        self.title_label.pack()
-
     def update_language(self):
-        # Update all translatable widgets
-        self.title_label.config(text=t("my_tab_title"))
+        self.title_label.setText(t("my_tab_title"))
 ```
 
 2. **Add translations** to `litrx/i18n.py`:
@@ -236,18 +254,16 @@ TRANSLATIONS = {
 }
 ```
 
-3. **Register tab** in `litrx/gui/main_window.py`:
+3. **Register tab** in `litrx/gui/main_window_qt.py`:
 ```python
-from litrx.gui.tabs.my_tab import MyTab
+from litrx.gui.tabs_qt.my_tab import MyTab
 
 class LitRxApp(BaseWindow):
-    def __init__(self, root):
-        super().__init__(root)
+    def __init__(self):
+        super().__init__()
 
-        # Add tab
         my_tab = MyTab(self)
-        self.notebook.add(my_tab, text=t("my_tab"))
-        self.tabs.append(("my_tab", my_tab))
+        self.tab_widget.addTab(my_tab, t("my_tab"))
 ```
 
 ### Adding a New Analysis Module
@@ -312,7 +328,7 @@ DEFAULT_CONFIG = {
 }
 ```
 
-2. **Save in GUI** (`litrx/gui/base_window.py`):
+2. **Save in GUI** (`litrx/gui/base_window_qt.py`):
 ```python
 def save_config(self):
     config = {
@@ -391,7 +407,7 @@ The abstract screener has a **two-stage AI verification** system:
 2. New service's previously saved key is loaded
 3. Each provider's key persisted independently
 
-**Implementation**: `litrx/gui/base_window.py:148-165`
+**Implementation**: `litrx/gui/base_window_qt.py`
 
 **Language Persistence**: Language preference saved to `~/.litrx_gui.yaml` and restored on startup
 
@@ -409,27 +425,27 @@ The abstract screener has a **two-stage AI verification** system:
 
 **Implementation**: `litrx/matrix_analyzer.py`
 
-### Threading Model (GUI)
+### Threading Model (GUI - Qt)
 
-Long-running tasks use daemon threads:
+Prefer emitting Qt signals from worker threads and handle them in main thread slots; avoid updating widgets directly from threads.
 ```python
-def process_files(self):
-    # Disable UI controls
-    self.start_button.config(state="disabled")
+from PyQt6.QtCore import pyqtSignal
 
-    # Run in background thread
-    thread = threading.Thread(target=self._process_thread, daemon=True)
-    thread.start()
+class CsvTab(QWidget):
+    update_progress = pyqtSignal(float)
+    def __init__(self, parent):
+        super().__init__()
+        self.update_progress.connect(lambda v: self.progress_bar.setValue(int(v)))
 
-def _process_thread(self):
-    # Do work
-    results = self.analyzer.analyze(data)
+    def start(self):
+        threading.Thread(target=self._worker, daemon=True).start()
 
-    # Update UI thread-safely
-    self.root.after(0, self._update_ui, results)
+    def _worker(self):
+        # ... work ...
+        self.update_progress.emit(50.0)
 ```
 
-**Critical**: Use `root.after()` for thread-safe UI updates, never update widgets directly from worker threads.
+Critical: update widgets only in the main thread (via signals/slots).
 
 ### Prompt Template System
 
@@ -778,7 +794,7 @@ title = row[title_col]
 | `litrx/config.py` | Configuration cascade logic |
 | `litrx/i18n.py` | Internationalization system |
 | `litrx/ai_client.py` | AI provider wrapper |
-| `litrx/gui/base_window.py` | GUI base class with shared controls |
+| `litrx/gui/base_window_qt.py` | GUI base class with shared controls (PyQt6) |
 | `litrx/csv_analyzer.py` | CSV relevance scoring |
 | `litrx/abstract_screener.py` | Abstract screening with verification |
 | `litrx/matrix_analyzer.py` | Literature matrix analysis (NEW) |

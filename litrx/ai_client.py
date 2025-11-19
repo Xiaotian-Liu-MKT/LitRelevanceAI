@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 from .config import DEFAULT_CONFIG as BASE_CONFIG, load_config as base_load_config
+from .resources import resource_path
 from .i18n import t
 from .logging_config import get_logger
 
@@ -25,7 +26,7 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
         configuration under ``configs/config.yaml`` is used.
     """
 
-    default_path = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    default_path = resource_path("configs", "config.yaml")
     return base_load_config(str(path or default_path), BASE_CONFIG)
 
 
@@ -63,6 +64,10 @@ class AIClient:
         self.service = service
         self.config = config
 
+        # Cache model capability (avoid per-request checks/log spam)
+        self.supports_temperature = self._detect_temperature_support(model)
+        self._warned_temperature = False
+
         # Initialize OpenAI client (works for both OpenAI and SiliconFlow)
         self.client = OpenAI(
             api_key=api_key,
@@ -85,21 +90,53 @@ class AIClient:
         dict:
             Response dictionary in OpenAI format with 'choices' key.
         """
-        try:
-            logger.debug(f"Sending API request with {len(messages)} messages, kwargs={kwargs}")
+        # Sanitize unsupported params for some models (e.g., GPT-5/o* may not accept temperature)
+        sanitized = dict(kwargs)
+        if not self.supports_temperature and "temperature" in sanitized:
+            if not self._warned_temperature:
+                logger.info("Model does not support 'temperature'; removing it from requests")
+                self._warned_temperature = True
+            sanitized.pop("temperature", None)
 
-            # Make the API call
+        try:
+            logger.debug(f"Sending API request with {len(messages)} messages, kwargs={sanitized}")
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                **kwargs
+                **sanitized
             )
 
-            logger.debug(f"API request successful, usage: {response.usage}")
-
-            # Convert response to dict format
+            logger.debug(f"API request successful, usage: {getattr(response, 'usage', None)}")
             return response.model_dump()
 
         except Exception as e:
+            # Fallback retry if server rejects temperature specifically
+            msg = str(e)
+            if "param":
+                pass
+            if ("temperature" in kwargs) and (
+                "Unsupported value" in msg or "unsupported_value" in msg or "param': 'temperature" in msg
+            ):
+                try:
+                    logger.warning("Retrying request without temperature due to model constraints")
+                    retry_kwargs = dict(sanitized)
+                    retry_kwargs.pop("temperature", None)
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        **retry_kwargs
+                    )
+                    return response.model_dump()
+                except Exception as e2:
+                    logger.error(f"AI request failed after retry: {e2}", exc_info=True)
+                    raise RuntimeError(t("error_ai_request_failed", error=str(e2))) from e2
+
             logger.error(f"AI request failed: {e}", exc_info=True)
             raise RuntimeError(t("error_ai_request_failed", error=str(e))) from e
+
+    @staticmethod
+    def _detect_temperature_support(model_name: str) -> bool:
+        """Heuristic to determine temperature support for a model name."""
+        name = (model_name or "").lower()
+        return not (name.startswith("gpt-5") or name.startswith("o1") or name.startswith("o3") or name.startswith("o-"))

@@ -8,6 +8,7 @@ Now uses PyQt6 for a modern UI experience.
 """
 
 import importlib
+import os
 import subprocess
 import sys
 

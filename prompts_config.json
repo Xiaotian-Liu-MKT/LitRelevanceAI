@@ -9,9 +9,5 @@
   },
   "pdf_screening": {
     "main_prompt": "请阅读所提供的文献并根据研究问题进行分析。请严格按照以下JSON格式以中文回答:\n{{{da_section}\n    \"screening_results\": {{\n{criteria_str}\n    }}\n}}"
-  },
-  "literature_matrix": {
-    "note": "Literature matrix analysis uses dynamically generated prompts based on configured dimensions. See matrix_analyzer.py for implementation details.",
-    "prompt_template": "请仔细阅读以下文献，并根据要求进行分析。\n\n{research_question_section}\n请严格按照以下JSON格式回答所有问题（使用中文）：\n\n{{\n{dimensions_str}\n}}\n\n重要说明：\n1. 请确保输出是有效的JSON格式\n2. 所有问题都必须回答，如果文中未提及或无法确定，请回答\"N/A\"或\"不确定\"\n3. 对于选择题，请严格从给定选项中选择\n4. 对于数值题，只回答数字或\"N/A\"\n5. 保持回答简洁但完整"
   }
 }

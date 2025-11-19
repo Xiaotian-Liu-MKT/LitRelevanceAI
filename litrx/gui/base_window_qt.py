@@ -24,11 +24,13 @@ from PyQt6.QtWidgets import (
     QWidget,
     QDialog,
     QDialogButtonBox,
+    QCheckBox,
 )
 from PyQt6.QtGui import QFont
 
 from ..config import DEFAULT_CONFIG as BASE_CONFIG, load_config, load_env_file
 from ..i18n import get_i18n, t
+from ..resources import resource_path
 
 try:
     import yaml
@@ -45,7 +47,7 @@ except ImportError:
 load_env_file()
 
 PERSIST_PATH = Path.home() / ".litrx_gui.yaml"
-PROMPTS_PATH = Path(__file__).resolve().parents[2] / "prompts_config.json"
+PROMPTS_PATH = resource_path("prompts_config.json")
 
 
 class BaseWindow(QMainWindow):
@@ -55,8 +57,7 @@ class BaseWindow(QMainWindow):
         super().__init__()
 
         # Initialize i18n and load saved language preference
-        repo_root = Path(__file__).resolve().parents[2]
-        config_path = repo_root / "configs" / "config.yaml"
+        config_path = resource_path("configs", "config.yaml")
 
         # Start with defaults from config.yaml then layer in persisted config
         self.base_config: Dict[str, str] = load_config(str(config_path), BASE_CONFIG)
@@ -115,13 +116,17 @@ class BaseWindow(QMainWindow):
         # Header
         header_layout = QHBoxLayout()
         self.title_label = QLabel(t("title_label"))
-        title_font = QFont("Segoe UI", 16, QFont.Weight.Bold)
+        # Use default system font to avoid missing family (e.g., Segoe UI on macOS/Linux)
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setWeight(QFont.Weight.Bold)
         self.title_label.setFont(title_font)
         self.title_label.setStyleSheet("color: #2c3e50;")
         header_layout.addWidget(self.title_label)
 
         self.subtitle_label = QLabel(t("subtitle_label"))
-        subtitle_font = QFont("Segoe UI", 9)
+        subtitle_font = QFont()
+        subtitle_font.setPointSize(9)
         self.subtitle_label.setFont(subtitle_font)
         self.subtitle_label.setStyleSheet("color: #7f8c8d; margin-left: 10px;")
         header_layout.addWidget(self.subtitle_label)
@@ -219,6 +224,9 @@ class BaseWindow(QMainWindow):
         self._update_language_display()
         self.i18n.add_observer(self._on_language_changed)
 
+        # First-run onboarding if credentials missing
+        self._maybe_show_first_run_wizard()
+
     def setup_styles(self) -> None:
         """Configure modern styling for the application."""
         app_stylesheet = """
@@ -252,11 +260,13 @@ class BaseWindow(QMainWindow):
                 background-color: #ffffff;
             }
             QPushButton {
-                border-radius: 3px;
-                padding: 5px 10px;
+                border-radius: 4px;
+                padding: 6px 12px;
+                border: 1px solid #bdc3c7;
+                background-color: #eaeaea;
             }
             QPushButton:hover {
-                opacity: 0.8;
+                background-color: #f2f2f2;
             }
         """
         self.setStyleSheet(app_stylesheet)
@@ -427,6 +437,69 @@ class BaseWindow(QMainWindow):
         self.language_combo.addItems(display_values)
         self.language_combo.setCurrentText(lang_display.get(current_code, lang_display["en"]))
         self.language_combo.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    # First-run onboarding
+    # ------------------------------------------------------------------
+    def _maybe_show_first_run_wizard(self) -> None:
+        """Show a minimal onboarding dialog to collect provider + API key on first run."""
+        service = self.base_config.get("AI_SERVICE", "openai")
+        has_openai = bool(self.base_config.get("OPENAI_API_KEY"))
+        has_sf = bool(self.base_config.get("SILICONFLOW_API_KEY"))
+        has_key = (service == "openai" and has_openai) or (service == "siliconflow" and has_sf)
+        if has_key:
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(t("config_settings"))
+        lay = QVBoxLayout(dlg)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel(t("ai_service")))
+        svc_combo = QComboBox()
+        svc_combo.addItems(["openai", "siliconflow"])
+        svc_combo.setCurrentText(service)
+        svc_combo.setMaximumWidth(180)
+        row1.addWidget(svc_combo)
+        row1.addStretch()
+        lay.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel(t("api_key")))
+        key_edit = QLineEdit()
+        key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        key_edit.setMinimumWidth(320)
+        row2.addWidget(key_edit)
+        row2.addStretch()
+        lay.addLayout(row2)
+
+        save_chk = QCheckBox(t("save_config"))
+        save_chk.setChecked(True)
+        lay.addWidget(save_chk)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        lay.addWidget(btns)
+
+        def on_ok():
+            sel = svc_combo.currentText()
+            key = key_edit.text().strip()
+            if not key:
+                QMessageBox.warning(dlg, t("warning"), t("api_key"))
+                return
+            # Apply to UI controls
+            self.service_combo.setCurrentText(sel)
+            self.api_key_entry.setText(key)
+            # Persist if requested
+            if save_chk.isChecked():
+                self.save_config()
+            dlg.accept()
+
+        btns.accepted.connect(on_ok)
+        btns.rejected.connect(dlg.reject)
+
+        dlg.setModal(True)
+        dlg.resize(520, 180)
+        dlg.exec()
 
     def _on_language_changed(self) -> None:
         """Called when language is changed to update all UI text."""

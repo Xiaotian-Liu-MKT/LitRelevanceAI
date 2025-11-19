@@ -5,18 +5,22 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+import os
 from typing import TYPE_CHECKING, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -38,6 +42,7 @@ from ...abstract_screener import (
     AbstractScreener,
 )
 from ...i18n import get_i18n, t
+from ...resources import resource_path
 
 if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
@@ -100,7 +105,12 @@ class AbstractTab(QWidget):
         mode_layout.addWidget(self.mode_combo)
 
         self.add_mode_btn = QPushButton(t("add_mode"))
+        self.add_mode_btn.clicked.connect(self.add_mode)
         mode_layout.addWidget(self.add_mode_btn)
+
+        self.edit_questions_btn = QPushButton(t("edit_questions"))
+        self.edit_questions_btn.clicked.connect(self.edit_questions)
+        mode_layout.addWidget(self.edit_questions_btn)
 
         left_layout.addLayout(mode_layout)
 
@@ -136,6 +146,11 @@ class AbstractTab(QWidget):
         self.stop_btn.clicked.connect(self.stop_screening)
         self.stop_btn.setEnabled(False)
         btn_layout.addWidget(self.stop_btn)
+
+        self.stats_btn = QPushButton(t("view_statistics"))
+        self.stats_btn.clicked.connect(self.show_statistics)
+        self.stats_btn.setEnabled(True)
+        btn_layout.addWidget(self.stats_btn)
 
         left_layout.addLayout(btn_layout)
 
@@ -210,10 +225,12 @@ class AbstractTab(QWidget):
         self.browse_btn.setText(t("browse"))
         self.mode_label.setText(t("screening_mode_label"))
         self.add_mode_btn.setText(t("add_mode"))
+        self.edit_questions_btn.setText(t("edit_questions"))
         self.verify_checkbox.setText(t("enable_verification"))
         self.workers_label.setText(t("concurrent_workers"))
         self.start_btn.setText(t("start_screening"))
         self.stop_btn.setText(t("stop_task"))
+        self.stats_btn.setText(t("view_statistics"))
         self.log_label.setText(t("log_label"))
         self.export_csv_btn.setText(t("export_csv"))
         self.export_excel_btn.setText(t("export_excel"))
@@ -276,23 +293,21 @@ class AbstractTab(QWidget):
         config = self.parent_window.build_config()
 
         try:
-            # Load questions
-            questions_dict = load_mode_questions(mode)
+            # Load questions for selected mode
+            q = load_mode_questions(mode)
+            open_q = q.get("open_questions", [])
+            yes_no_q = q.get("yes_no_questions", [])
 
-            # Load data
-            df = load_and_validate_data(file_path)
-            df = prepare_dataframe(df, questions_dict)
+            # Load and validate data
+            df, title_col, abstract_col = load_and_validate_data(file_path, config)
+            df = prepare_dataframe(df, open_q, yes_no_q)
 
             self.df = df
             total = len(df)
 
             # Create screener
-            enable_verification = self.verify_checkbox.isChecked()
-            screener = AbstractScreener(
-                config,
-                questions_dict,
-                enable_verification=enable_verification
-            )
+            config["ENABLE_VERIFICATION"] = bool(self.verify_checkbox.isChecked())
+            screener = AbstractScreener(config)
 
             # Process each row
             for i, (idx, row) in enumerate(df.iterrows(), start=1):
@@ -301,15 +316,20 @@ class AbstractTab(QWidget):
                     break
 
                 try:
-                    title = row.get('Title', '')
-                    abstract = row.get('Abstract', '')
-
+                    title = str(row.get('Title', ''))
                     self.update_status_signal.emit(f"Processing {i}/{total}: {title[:50]}...")
                     self.append_log_signal.emit(f"[{i}/{total}] {title[:50]}...")
 
-                    result = screener.screen_abstract(title, abstract)
+                    # Compute results (thread-safe; does not mutate df)
+                    results = screener.compute_single_article_results(
+                        row, title_col, abstract_col, open_q, yes_no_q
+                    )
 
-                    # Update table
+                    # Apply to DataFrame
+                    for col_name, value in results.get("columns", {}).items():
+                        df.at[idx, col_name] = value
+
+                    # Update table UI
                     self._add_result_row(i - 1, title, "Completed", "Analyzed")
 
                 except Exception as e:
@@ -320,8 +340,20 @@ class AbstractTab(QWidget):
                 self.update_progress_signal.emit(i / total * 100)
 
             if not self.stop_flag:
+                # Auto-save results beside the input file using configured suffix
+                try:
+                    base, ext = os.path.splitext(file_path)
+                    suffix = config.get("OUTPUT_FILE_SUFFIX", "_analyzed")
+                    output_file_path = f"{base}{suffix}{ext}"
+                    if ext.lower() == ".csv":
+                        df.to_csv(output_file_path, index=False, encoding="utf-8-sig")
+                    else:
+                        df.to_excel(output_file_path, index=False)
+                    self.show_info_signal.emit(t("success"), t("complete_saved", path=output_file_path))
+                except Exception as e:
+                    self.show_error_signal.emit(t("error"), str(e))
+
                 self.enable_export_signal.emit()
-                self.show_info_signal.emit(t("success"), "Screening completed!")
 
         except Exception as e:
             self.show_error_signal.emit(t("error"), str(e))
@@ -331,8 +363,11 @@ class AbstractTab(QWidget):
 
     def _add_result_row(self, row: int, title: str, status: str, summary: str) -> None:
         """Add a result row to the table (must be called from main thread via signal)."""
-        # This is a simplified version - in reality you'd emit a signal
-        pass
+        if row >= self.results_table.rowCount():
+            self.results_table.setRowCount(row + 1)
+        self.results_table.setItem(row, 0, QTableWidgetItem(title))
+        self.results_table.setItem(row, 1, QTableWidgetItem(status))
+        self.results_table.setItem(row, 2, QTableWidgetItem(summary))
 
     def _update_progress(self, value: float) -> None:
         """Update progress bar."""
@@ -363,6 +398,271 @@ class AbstractTab(QWidget):
         """Restore button states."""
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+
+    # ------------------------------------------------------------------
+    # Modes and Questions Management
+    # ------------------------------------------------------------------
+    def _questions_path(self) -> Path:
+        return resource_path("questions_config.json")
+
+    def add_mode(self) -> None:
+        """Add a new screening mode and persist to questions_config.json."""
+        from PyQt6.QtWidgets import QInputDialog
+
+        name, ok = QInputDialog.getText(self, t("new_mode"), t("enter_mode_name"))
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+
+        q_path = self._questions_path()
+        try:
+            if q_path.exists():
+                with q_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                data = {}
+        except Exception:
+            data = {}
+
+        if name in data:
+            QMessageBox.warning(self, t("warning"), t("mode_exists"))
+            return
+
+        # Create empty mode template
+        data[name] = {
+            "description": "",
+            "open_questions": [],
+            "yes_no_questions": []
+        }
+
+        try:
+            with q_path.open("w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), str(e))
+            return
+
+        # Refresh combo
+        self._load_modes()
+        self.mode_combo.clear()
+        self.mode_combo.addItems(self.mode_options)
+        # Select new mode
+        idx = self.mode_combo.findText(name)
+        if idx >= 0:
+            self.mode_combo.setCurrentIndex(idx)
+
+        QMessageBox.information(self, t("success"), t("saved"))
+
+    def edit_questions(self) -> None:
+        """Open a simple Qt dialog to edit questions for the selected mode."""
+        mode = self.mode_combo.currentText().strip()
+        if not mode:
+            QMessageBox.warning(self, t("warning"), t("please_select_mode"))
+            return
+
+        q_path = self._questions_path()
+        try:
+            with q_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+
+        mode_data = data.get(mode, {"open_questions": [], "yes_no_questions": []})
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(t("edit_questions"))
+        layout = QVBoxLayout(dialog)
+
+        # Two lists: open and yes/no with labels
+        lists_layout = QHBoxLayout()
+        left_col = QVBoxLayout(); right_col = QVBoxLayout()
+        left_col.addWidget(QLabel(t("open_questions")))
+        right_col.addWidget(QLabel(t("yes_no_questions")))
+        open_list = QListWidget()
+        yn_list = QListWidget()
+        for q in mode_data.get("open_questions", []):
+            QListWidgetItem(q.get("question", ""), open_list)
+        for q in mode_data.get("yes_no_questions", []):
+            QListWidgetItem(q.get("question", ""), yn_list)
+        left_col.addWidget(open_list)
+        right_col.addWidget(yn_list)
+        lists_layout.addLayout(left_col)
+        lists_layout.addLayout(right_col)
+        layout.addLayout(lists_layout)
+
+        # Editors
+        form_layout = QVBoxLayout()
+        key_edit = QLineEdit(); key_edit.setPlaceholderText("key")
+        col_edit = QLineEdit(); col_edit.setPlaceholderText("column_name")
+        q_text = QTextEdit(); q_text.setPlaceholderText("question")
+        form_layout.addWidget(key_edit)
+        form_layout.addWidget(col_edit)
+        form_layout.addWidget(q_text)
+        layout.addLayout(form_layout)
+
+        # Buttons
+        btns = QHBoxLayout()
+        add_open = QPushButton(t("add"))
+        add_yn = QPushButton(t("add"))
+        edit_btn = QPushButton(t("edit"))
+        del_btn = QPushButton(t("delete"))
+        save_btn = QPushButton(t("save"))
+        cancel_btn = QPushButton(t("cancel"))
+        btns.addWidget(add_open)
+        btns.addWidget(add_yn)
+        btns.addWidget(edit_btn)
+        btns.addWidget(del_btn)
+        btns.addStretch()
+        btns.addWidget(save_btn)
+        btns.addWidget(cancel_btn)
+        layout.addLayout(btns)
+
+        def read_fields():
+            return {
+                "key": key_edit.text().strip(),
+                "column_name": col_edit.text().strip(),
+                "question": q_text.toPlainText().strip(),
+            }
+
+        def validate(item: dict) -> bool:
+            if not item.get("key"):
+                QMessageBox.critical(dialog, t("error"), t("key_cannot_empty"))
+                return False
+            if not item.get("column_name"):
+                QMessageBox.critical(dialog, t("error"), t("column_name_cannot_empty"))
+                return False
+            if not item.get("question"):
+                QMessageBox.critical(dialog, t("error"), t("question_cannot_empty"))
+                return False
+            return True
+
+        def add_to_list(target_list: QListWidget, key_prefix: str):
+            item = read_fields()
+            if not validate(item):
+                return
+            QListWidgetItem(item["question"], target_list)
+            mode_data.setdefault(f"{key_prefix}", []).append(item)
+
+        def on_add_open():
+            add_to_list(open_list, "open_questions")
+
+        def on_add_yn():
+            add_to_list(yn_list, "yes_no_questions")
+
+        def on_edit():
+            # Determine which list has selection
+            target = open_list if open_list.currentRow() >= 0 else yn_list
+            key_prefix = "open_questions" if target is open_list else "yes_no_questions"
+            idx = target.currentRow()
+            if idx < 0:
+                QMessageBox.warning(dialog, t("warning"), t("please_select_question"))
+                return
+            # Preload fields from current selection if empty
+            current_items = mode_data.get(key_prefix, [])
+            current = current_items[idx] if idx < len(current_items) else {}
+            if not key_edit.text().strip():
+                key_edit.setText(current.get("key", ""))
+            if not col_edit.text().strip():
+                col_edit.setText(current.get("column_name", ""))
+            if not q_text.toPlainText().strip():
+                q_text.setPlainText(current.get("question", ""))
+
+            item = read_fields()
+            if not validate(item):
+                return
+            # Update data
+            mode_data.setdefault(key_prefix, [])
+            mode_data[key_prefix][idx] = item
+            target.item(idx).setText(item["question"])
+
+        def load_selection_to_fields():
+            # Keep selection exclusive and populate fields with selected item
+            if open_list.currentRow() >= 0:
+                yn_list.clearSelection()
+                idx = open_list.currentRow()
+                data_list = mode_data.get("open_questions", [])
+            elif yn_list.currentRow() >= 0:
+                open_list.clearSelection()
+                idx = yn_list.currentRow()
+                data_list = mode_data.get("yes_no_questions", [])
+            else:
+                return
+            if 0 <= idx < len(data_list):
+                d = data_list[idx]
+                key_edit.setText(d.get("key", ""))
+                col_edit.setText(d.get("column_name", ""))
+                q_text.setPlainText(d.get("question", ""))
+
+        open_list.currentRowChanged.connect(lambda _: load_selection_to_fields())
+        yn_list.currentRowChanged.connect(lambda _: load_selection_to_fields())
+        open_list.itemDoubleClicked.connect(lambda _: load_selection_to_fields())
+        yn_list.itemDoubleClicked.connect(lambda _: load_selection_to_fields())
+
+        def on_delete():
+            target = open_list if open_list.currentRow() >= 0 else yn_list
+            key_prefix = "open_questions" if target is open_list else "yes_no_questions"
+            idx = target.currentRow()
+            if idx < 0:
+                return
+            mode_data.setdefault(key_prefix, [])
+            del mode_data[key_prefix][idx]
+            target.takeItem(idx)
+
+        def on_save():
+            # Persist to file
+            try:
+                # Ensure outer structure
+                all_data = data
+                all_data[mode] = {
+                    "description": mode_data.get("description", ""),
+                    "open_questions": mode_data.get("open_questions", []),
+                    "yes_no_questions": mode_data.get("yes_no_questions", []),
+                }
+                with q_path.open("w", encoding="utf-8") as f:
+                    json.dump(all_data, f, ensure_ascii=False, indent=2)
+                QMessageBox.information(dialog, t("success"), t("question_config_saved"))
+                dialog.accept()
+            except Exception as e:
+                QMessageBox.critical(dialog, t("error"), t("save_question_config_failed", error=str(e)))
+
+        def on_cancel():
+            dialog.reject()
+
+        add_open.clicked.connect(on_add_open)
+        add_yn.clicked.connect(on_add_yn)
+        edit_btn.clicked.connect(on_edit)
+        del_btn.clicked.connect(on_delete)
+        save_btn.clicked.connect(on_save)
+        cancel_btn.clicked.connect(on_cancel)
+
+        # Select first item to prefill if available
+        if open_list.count() > 0:
+            open_list.setCurrentRow(0)
+        elif yn_list.count() > 0:
+            yn_list.setCurrentRow(0)
+
+        dialog.resize(760, 480)
+        dialog.exec()
+
+    def show_statistics(self) -> None:
+        """Show statistics summary for current results and mode."""
+        if self.df is None:
+            QMessageBox.information(self, t("hint"), t("please_complete_screening"))
+            return
+        # Load questions for mode
+        mode = self.mode_combo.currentText().strip()
+        q = load_mode_questions(mode)
+        screener = AbstractScreener(self.parent_window.build_config())
+        stats = screener.generate_statistics(self.df, q.get("open_questions", []), q.get("yes_no_questions", []))
+
+        # Render as simple text
+        lines = [t("statistics_summary", count=stats.get('total_articles', 0))]
+        for qtext, counts in stats.get('yes_no_results', {}).items():
+            lines.append(f"- {qtext}: 是 {counts.get('是', 0)}, 否 {counts.get('否', 0)}, 不确定 {counts.get('不确定', 0)}")
+        for qtext, oc in stats.get('open_question_stats', {}).items():
+            lines.append(f"- {qtext}: answered {oc.get('answered', 0)}, missing {oc.get('missing', 0)}")
+
+        QMessageBox.information(self, t("screening_statistics"), "\n".join(lines))
 
     def export_csv(self) -> None:
         """Export results to CSV."""

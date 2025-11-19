@@ -20,6 +20,7 @@ from .cache import get_cache
 from .constants import CHECKPOINT_INTERVAL, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from .logging_config import get_logger
 from .utils import AIResponseParser, ColumnDetector
+from .resources import resource_path
 
 
 load_env_file()
@@ -35,10 +36,10 @@ DEFAULT_CONFIG = {
 def load_config(path: Optional[str] = None, questions_path: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Load module configuration and question templates."""
 
-    default_cfg = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    default_cfg = resource_path("configs", "config.yaml")
     config = base_load_config(str(path or default_cfg), DEFAULT_CONFIG)
 
-    q_path = questions_path or Path(__file__).resolve().parent.parent / "configs" / "questions" / "csv.yaml"
+    q_path = questions_path or resource_path("configs", "questions", "csv.yaml")
     with open(q_path, 'r', encoding='utf-8') as f:
         questions = yaml.safe_load(f) or {}
 
@@ -58,7 +59,7 @@ class LiteratureAnalyzer:
 
     def _load_prompt_template(self) -> str:
         """Load prompt template from prompts_config.json."""
-        prompts_path = Path(__file__).resolve().parent.parent / "prompts_config.json"
+        prompts_path = resource_path("prompts_config.json")
         try:
             with open(prompts_path, 'r', encoding='utf-8') as f:
                 prompts = json.load(f)
@@ -130,10 +131,10 @@ Please return in the following JSON format:
             abstract=abstract
         )
         try:
-            response = self.client.request(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.config.get("TEMPERATURE", 0.3),
-            )
+            req_kwargs = {}
+            if getattr(self.client, "supports_temperature", True):
+                req_kwargs["temperature"] = self.config.get("TEMPERATURE", 0.3)
+            response = self.client.request(messages=[{"role": "user", "content": prompt}], **req_kwargs)
             response_text = response["choices"][0]["message"]["content"].strip()
 
             # Use unified parser with relevance-specific fallback

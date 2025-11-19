@@ -26,6 +26,7 @@ from .constants import DEFAULT_MAX_WORKERS, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from .logging_config import get_logger
 from .prompt_builder import PromptBuilder
 from .utils import AIResponseParser
+from .resources import resource_path
 
 
 load_env_file()
@@ -58,8 +59,8 @@ DEFAULT_CONFIG = {
     'API_REQUEST_DELAY': 1,
     'ENABLE_VERIFICATION': True,
     'MAX_WORKERS': DEFAULT_MAX_WORKERS,
-    'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题'],
-    'ABSTRACT_COLUMN_VARIANTS': ['Abstract', '摘要', 'Summary'],
+    'TITLE_COLUMN_VARIANTS': ['Title', 'Article Title', '标题', '文献标题', 'Short Title'],
+    'ABSTRACT_COLUMN_VARIANTS': ['Abstract', 'Abstract Note', '摘要', 'Summary'],
 }
 
 
@@ -76,7 +77,7 @@ def load_mode_questions(mode: str) -> Dict[str, Any]:
         Dictionary with open_questions and yes_no_questions
     """
     # Try new unified config format
-    unified_path = Path(__file__).resolve().parent.parent / "configs" / "abstract" / f"{mode}.yaml"
+    unified_path = resource_path("configs", "abstract", f"{mode}.yaml")
     if unified_path.exists():
         try:
             with unified_path.open("r", encoding="utf-8") as f:
@@ -91,7 +92,7 @@ def load_mode_questions(mode: str) -> Dict[str, Any]:
             logger.warning(f"警告: 加载统一配置失败: {e}")
 
     # Fall back to legacy format
-    legacy_path = Path(__file__).resolve().parent.parent / "questions_config.json"
+    legacy_path = resource_path("questions_config.json")
     try:
         with legacy_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
@@ -102,7 +103,7 @@ def load_mode_questions(mode: str) -> Dict[str, Any]:
 
 def load_prompts() -> Dict[str, str]:
     """Load prompt templates from prompts_config.json."""
-    prompts_path = Path(__file__).resolve().parent.parent / "prompts_config.json"
+    prompts_path = resource_path("prompts_config.json")
     try:
         with prompts_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
@@ -114,7 +115,7 @@ def load_prompts() -> Dict[str, str]:
 def load_config(path: Optional[str] = None, mode: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Load module configuration and questions for the given mode."""
 
-    default_cfg = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    default_cfg = resource_path("configs", "config.yaml")
     config = base_load_config(str(path or default_cfg), DEFAULT_CONFIG)
 
     mode = mode or config.get("CONFIG_MODE", "weekly_screening")
@@ -169,6 +170,7 @@ def load_and_validate_data(file_path, config, title_column=None, abstract_column
         raise IOError(f"读取文件失败: {file_path}\n错误: {e}")
 
     # Auto-detect or validate title column
+    title_variants = config.get('TITLE_COLUMN_VARIANTS', DEFAULT_CONFIG.get('TITLE_COLUMN_VARIANTS', []))
     if title_column:
         if title_column not in df.columns:
             raise ColumnNotFoundError(
@@ -176,19 +178,20 @@ def load_and_validate_data(file_path, config, title_column=None, abstract_column
                 f"可用列: {', '.join(df.columns)}"
             )
     else:
-        for col_name_variant in config['TITLE_COLUMN_VARIANTS']:
+        for col_name_variant in title_variants:
             if col_name_variant in df.columns:
                 title_column = col_name_variant
                 break
         if not title_column:
             raise ColumnNotFoundError(
                 f"无法自动识别标题列。\n"
-                f"尝试过的列名: {', '.join(config['TITLE_COLUMN_VARIANTS'])}\n"
+                f"尝试过的列名: {', '.join(title_variants)}\n"
                 f"可用列: {', '.join(df.columns)}\n"
                 f"请在GUI中手动选择标题列。"
             )
 
     # Auto-detect or validate abstract column
+    abstract_variants = config.get('ABSTRACT_COLUMN_VARIANTS', DEFAULT_CONFIG.get('ABSTRACT_COLUMN_VARIANTS', []))
     if abstract_column:
         if abstract_column not in df.columns:
             raise ColumnNotFoundError(
@@ -196,14 +199,14 @@ def load_and_validate_data(file_path, config, title_column=None, abstract_column
                 f"可用列: {', '.join(df.columns)}"
             )
     else:
-        for col_name_variant in config['ABSTRACT_COLUMN_VARIANTS']:
+        for col_name_variant in abstract_variants:
             if col_name_variant in df.columns:
                 abstract_column = col_name_variant
                 break
         if not abstract_column:
             raise ColumnNotFoundError(
                 f"无法自动识别摘要列。\n"
-                f"尝试过的列名: {', '.join(config['ABSTRACT_COLUMN_VARIANTS'])}\n"
+                f"尝试过的列名: {', '.join(abstract_variants)}\n"
                 f"可用列: {', '.join(df.columns)}\n"
                 f"请在GUI中手动选择摘要列。"
             )
@@ -264,11 +267,11 @@ def get_ai_response_with_retry(prompt_text, client, config, open_questions, yes_
 
     for attempt in range(max_retries):
         try:
-            response = client.request(
-                messages=[{"role": "user", "content": prompt_text}],
-                temperature=0.3,
-                response_format={"type": "json_object"},
-            )
+            req_kwargs = {"response_format": {"type": "json_object"}}
+            # Only include temperature if model supports it
+            if getattr(client, "supports_temperature", True):
+                req_kwargs["temperature"] = 0.3
+            response = client.request(messages=[{"role": "user", "content": prompt_text}], **req_kwargs)
             return response['choices'][0]['message']['content'].strip()
         except Exception as e:
             logger.warning(f"第 {attempt + 1} 次尝试失败: {e}")
@@ -387,11 +390,10 @@ def verify_ai_response(title, abstract, initial_json, client, open_questions, ye
     )
 
     try:
-        response = client.request(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
+        req_kwargs = {"response_format": {"type": "json_object"}}
+        if getattr(client, "supports_temperature", True):
+            req_kwargs["temperature"] = 0
+        response = client.request(messages=[{"role": "user", "content": prompt}], **req_kwargs)
         content = response["choices"][0]["message"]["content"].strip()
         return parse_ai_response_json(content, open_questions, yes_no_questions)
     except Exception as e:

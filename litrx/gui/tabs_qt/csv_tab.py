@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import threading
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
@@ -217,6 +219,16 @@ class CsvTab(QWidget):
 
             # Enable export button when done (only if not cancelled)
             if not (self.current_task and self.current_task.is_cancelled()):
+                # Auto-save results beside the input CSV with timestamped name
+                try:
+                    file_dir = os.path.dirname(path)
+                    file_name = os.path.splitext(os.path.basename(path))[0]
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    out_path = os.path.join(file_dir, f"{file_name}_analyzed_{timestamp}.csv")
+                    df.to_csv(out_path, index=False, encoding='utf-8-sig')
+                    self.show_info_signal.emit(t("success"), t("complete_saved", path=out_path))
+                except Exception as e:
+                    self.show_error_signal.emit(t("error"), str(e))
                 self.enable_export_signal.emit()
 
         except TaskCancelledException:

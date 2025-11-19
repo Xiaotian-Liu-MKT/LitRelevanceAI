@@ -216,8 +216,8 @@ class ColumnDetector:
 
     # Common column name variants
     COLUMN_VARIANTS = {
-        'title': ['Title', '文献标题', 'Article Title', '标题', 'title'],
-        'abstract': ['Abstract', '摘要', 'abstract'],
+        'title': ['Title', '文献标题', 'Article Title', '标题', 'Short Title', 'title'],
+        'abstract': ['Abstract', 'Abstract Note', '摘要', 'abstract', 'Summary'],
         'author': ['Author', 'Authors', '作者', 'author'],
         'year': ['Year', '年份', 'Publication Year', 'year'],
         'doi': ['DOI', 'doi'],

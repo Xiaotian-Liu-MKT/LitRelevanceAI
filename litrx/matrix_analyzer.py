@@ -50,6 +50,7 @@ from .ai_client import AIClient
 from .constants import TITLE_SIMILARITY_THRESHOLD, FUZZY_MATCH_MIN_SCORE
 from .logging_config import get_logger
 from .utils import AIResponseParser
+from .resources import resource_path
 
 
 load_env_file()
@@ -81,7 +82,7 @@ DEFAULT_CONFIG: Dict[str, object] = {
 def load_matrix_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load matrix dimension configuration from YAML file."""
     if not config_path:
-        config_path = Path(__file__).resolve().parent.parent / "configs" / "matrix" / "default.yaml"
+        config_path = resource_path("configs", "matrix", "default.yaml")
 
     with open(config_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f) or {}
@@ -89,7 +90,7 @@ def load_matrix_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load module configuration."""
-    default_cfg = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+    default_cfg = resource_path("configs", "config.yaml")
     return base_load_config(str(config_path or default_cfg), DEFAULT_CONFIG)
 
 
