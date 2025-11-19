@@ -10,7 +10,7 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
 - **CSV relevance analysis** – scores Scopus exports from 0–100 with model-generated explanations.
 - **Abstract screening** – applies configurable yes/no criteria and open questions to titles and abstracts. Answers can be rechecked against the source text (controlled by the `ENABLE_VERIFICATION` flag or GUI checkbox) with support status stored in `<column>_verified` fields. Modes are loaded from `questions_config.json` so weekly and custom presets can be edited in the GUI.
 - **PDF screening** – converts PDFs to text and checks them against research questions and detailed criteria.
-- **Modular GUI** – a Tkinter application with dedicated tabs for CSV analysis, abstract screening, and PDF screening. A settings dropdown switches between OpenAI and Gemini and remembers API keys for each provider.
+- **Modular GUI** – a PyQt6 application with dedicated tabs for CSV analysis, abstract screening, and literature matrix analysis. A settings dropdown switches between OpenAI and SiliconFlow and remembers API keys for each provider.
 
 ## Repository Structure
 - `litrx/` – core package
@@ -19,12 +19,13 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
   - `csv_analyzer.py` – relevance scoring for Scopus CSV exports
   - `abstract_screener.py` – title/abstract screening with configurable questions and automated verification of AI answers
   - `pdf_screener.py` – folder-based PDF screening and metadata matching
-  - `ai_client.py` – LiteLLM wrapper for OpenAI/Gemini
+  - `ai_client.py` – OpenAI SDK wrapper (supports OpenAI and SiliconFlow APIs)
   - `config.py` – merges `.env`, YAML/JSON config, and CLI flags into `DEFAULT_CONFIG`
-  - `gui/` – Tkinter GUI framework
-    - `base_window.py` – shared controls and config persistence
-    - `main_window.py` – registers GUI tabs
-    - `tabs/` – `csv_tab.py`, `abstract_tab.py`, `pdf_tab.py`
+  - `gui/` – PyQt6 GUI framework
+    - `base_window_qt.py` – shared controls and config persistence
+    - `main_window_qt.py` – registers GUI tabs
+    - `tabs_qt/` – `csv_tab.py`, `abstract_tab.py`, `matrix_tab.py`
+    - `dialogs_qt/` – AI assistant dialogs for configuration generation
 - `configs/` – default settings and question templates
   - `config.yaml` – baseline API configuration
   - `questions/*.yaml` – prompts for CSV, abstract, and PDF workflows
@@ -37,7 +38,7 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
 - Follow PEP 8 with 4-space indents and descriptive `snake_case` names.
 - Group imports: standard library, third‑party, then local modules.
 - Use type hints and informative error messages.
-- Reuse shared utilities: `load_env_file`, `load_config`, `AIClient`, and `BaseWindow`.
+- Reuse shared utilities: `load_env_file`, `load_config`, `AIClient`, and `BaseWindow` (PyQt6 version).
 - GUI configuration loads `configs/config.yaml`, then `~/.litrx_gui.yaml`, then `.env`.
 - Prefer `rg` for repository searches; avoid `ls -R` or `grep -R`.
 - Update both README files when CLI or packaging changes.
@@ -48,7 +49,7 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
    ```bash
    python -m pip install -e .
    ```
-3. Copy `.env.example` to `.env` and set `OPENAI_API_KEY` or `GEMINI_API_KEY`.
+3. Copy `.env.example` to `.env` and set `OPENAI_API_KEY` or `SILICONFLOW_API_KEY`.
 4. Verify the CLI:
    ```bash
    python -m litrx --help
@@ -80,8 +81,8 @@ LitRelevanceAI is an AI-assisted toolkit for evaluating how well academic papers
 ## Special Considerations
 - **Security** – keep API keys out of source control; rely on environment variables.
 - **Performance** – respect `API_REQUEST_DELAY` when batching model calls; process large datasets incrementally.
-- **Compatibility** – `AIClient` abstracts OpenAI and Gemini; use cross-platform paths and avoid OS-specific assumptions.
-- **GUI** – add new tabs under `litrx/gui/tabs/` and register them in `LitRxApp`. The base window's service selector toggles between OpenAI and Gemini; ensure the API key field and config saving remain provider-specific.
+- **Compatibility** – `AIClient` abstracts OpenAI and SiliconFlow APIs; use cross-platform paths and avoid OS-specific assumptions.
+- **GUI** – add new tabs under `litrx/gui/tabs_qt/` and register them in `LitRxApp`. The base window's service selector toggles between OpenAI and SiliconFlow; ensure the API key field and config saving remain provider-specific. Use PyQt6 QThread for long-running operations to prevent UI freezing.
 - **Validation** – the verification workflow cross-checks model outputs with source text to confirm screening decisions and highlight unsupported answers.
 - **Abstract screening sync** – when modifying summary-filtering logic or `abstract_screener.py`, update `README.md`, `Chinese_README.md`, and GUI prompts to keep documentation aligned.
 
