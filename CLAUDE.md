@@ -10,6 +10,10 @@ This document provides comprehensive guidance for AI assistants (like Claude Cod
 - **CSV Relevance Analysis**: Score Scopus exports (0-100) with AI-generated relevance explanations
 - **Abstract Screening**: Configurable yes/no criteria and open questions with optional verification workflow
 - **Literature Matrix Analysis**: Structured data extraction with 7 question types (text, yes_no, single_choice, multiple_choice, number, rating, list)
+- **AI-Assisted Configuration**: Natural language generation of screening modes and matrix dimensions
+- **Result Caching**: Intelligent caching to reduce redundant API calls and costs
+- **Progress Management**: Atomic checkpoints with automatic recovery from interruptions
+- **Secure Key Management**: Optional keyring integration for secure API key storage
 - **PDF Screening**: Legacy full-text analysis (superseded by matrix analyzer)
 - **Bilingual GUI**: PyQt6 interface with Chinese/English support
 
@@ -20,33 +24,53 @@ This document provides comprehensive guidance for AI assistants (like Claude Cod
 - **Data**: pandas, openpyxl
 - **PDF**: pypdf
 - **Config**: YAML, JSON, .env files
+- **Security**: keyring (secure credential storage)
+- **Concurrency**: filelock (atomic file operations)
+- **Validation**: pydantic >= 2.0
 - **Testing**: pytest (minimal coverage currently)
 
 ## Repository Structure
 
 ```
 LitRelevanceAI/
-├── litrx/                          # Main package (~4000 LOC)
+├── litrx/                          # Main package (~7000+ LOC)
 │   ├── __init__.py                 # Package initialization
 │   ├── __main__.py                 # Entry point: python -m litrx
 │   ├── cli.py                      # CLI dispatcher (csv/abstract/matrix commands)
 │   ├── config.py                   # Cascading configuration management
+│   ├── config_factory.py           # Configuration factory patterns
 │   ├── ai_client.py                # OpenAI SDK wrapper for AI providers
+│   ├── ai_config_generator.py      # AI-powered configuration generation
 │   ├── i18n.py                     # Internationalization (Observer pattern)
 │   ├── csv_analyzer.py             # CSV relevance scoring (LiteratureAnalyzer)
 │   ├── abstract_screener.py        # Title/abstract screening with verification
 │   ├── pdf_screener.py             # PDF analysis (LEGACY - use matrix_analyzer)
-│   ├── matrix_analyzer.py          # Literature matrix analysis (NEW)
+│   ├── matrix_analyzer.py          # Literature matrix analysis
+│   ├── cache.py                    # Result caching system for AI responses
+│   ├── progress_manager.py         # Atomic checkpoint management with file locking
+│   ├── task_manager.py             # Cancellable task management
+│   ├── key_manager.py              # Secure API key storage via keyring
+│   ├── prompt_builder.py           # Reusable prompt building
+│   ├── exceptions.py               # Custom exception hierarchy
+│   ├── constants.py                # Project-wide constants
+│   ├── utils.py                    # Shared utility functions
+│   ├── logging_config.py           # Centralized logging configuration
+│   ├── resources.py                # Resource path helper for PyInstaller
+│   ├── prompts/                    # AI prompt templates
+│   │   ├── abstract_mode_generation.txt    # Template for mode generation
+│   │   └── matrix_dimension_generation.txt # Template for dimension generation
 │   └── gui/                        # PyQt6 GUI components
 │       ├── base_window_qt.py       # BaseWindow (Qt) class with shared controls
 │       ├── main_window_qt.py       # LitRxApp (Qt) - main application window
 │       ├── tabs_qt/                # Feature tabs (Qt)
 │       │   ├── csv_tab.py          # CSV analysis tab
 │       │   ├── abstract_tab.py     # Abstract screening tab
-│       │   ├── matrix_tab.py       # Literature matrix tab (NEW)
-│       │   └── pdf_tab.py          # PDF screening tab (LEGACY)
-│       └── dialogs/
-│           └── dimension_editor.py # Matrix dimension configuration
+│       │   └── matrix_tab.py       # Literature matrix tab
+│       └── dialogs_qt/             # Qt dialogs
+│           ├── dimensions_editor_qt.py     # Basic dimension editor
+│           ├── dimensions_editor_qt_v2.py  # Enhanced graphical dimension editor
+│           ├── ai_mode_assistant_qt.py     # AI assistant for screening modes
+│           └── ai_matrix_assistant_qt.py   # AI assistant for matrix dimensions
 ├── configs/                        # Configuration files
 │   ├── config.yaml                 # Default AI service settings
 │   ├── questions/                  # Question templates per module
@@ -57,10 +81,14 @@ LitRelevanceAI/
 │       └── default.yaml            # Matrix dimensions config
 ├── docs/                           # Documentation
 │   ├── ARCHITECTURE.md             # Detailed architecture
+│   ├── AI_ASSISTED_CONFIG_DESIGN.md           # AI-assisted config design
+│   ├── AI_ASSISTED_CONFIG_IMPLEMENTATION_PLAN.md  # Implementation plan
+│   ├── GPT5_GUIDE.md               # Guide for newer AI models
 │   └── 项目功能与架构概览.md        # Chinese overview
 ├── tests/                          # Unit tests (minimal coverage)
 │   └── test_abstract_verification.py
 ├── run_gui.py                      # GUI launcher with auto-install
+├── test_ai_dialogs.py              # Test script for AI assistant dialogs
 ├── questions_config.json           # Abstract screening modes
 ├── prompts_config.json             # AI prompt templates (GUI-editable)
 ├── pyproject.toml                  # PEP 621 packaging
@@ -69,6 +97,7 @@ LitRelevanceAI/
 ├── README.md                       # English documentation
 ├── Chinese_README.md               # Chinese documentation
 ├── AGENTS.md                       # Developer guide
+├── TEST_AI_ASSISTANTS.md           # Testing guide for AI assistants
 └── CLAUDE.md                       # This file
 
 ```
@@ -215,6 +244,187 @@ Configuration priority (low to high):
 - `load_config(path, defaults)`: Merge YAML/JSON with defaults
 - Configuration keys: `AI_SERVICE`, `MODEL_NAME`, `{OPENAI|SILICONFLOW}_API_KEY`, `API_BASE`, `LANGUAGE`, `ENABLE_VERIFICATION`
 
+### 5. Result Caching System
+
+**Location**: `litrx/cache.py`
+
+The caching system prevents redundant API calls by storing analysis results:
+
+```python
+from litrx.cache import ResultCache
+
+# Initialize cache (defaults to ~/.litrx/cache with 30-day TTL)
+cache = ResultCache()
+
+# Check for cached result
+cache_key = cache.get(title="Paper Title", abstract="Abstract text")
+if cache_key:
+    result = cache_key
+else:
+    # Make API call
+    result = ai_client.request(prompt)
+    # Cache the result
+    cache.set(title="Paper Title", abstract="Abstract text", result=result)
+```
+
+**Key Features**:
+- SHA256-based cache keys from content
+- Configurable TTL (time-to-live)
+- Automatic cleanup of expired entries
+- Thread-safe operations
+- Stored in `~/.litrx/cache/`
+
+### 6. Progress Management System
+
+**Location**: `litrx/progress_manager.py`
+
+Atomic checkpoint system with file locking prevents data loss:
+
+```python
+from litrx.progress_manager import ProgressManager
+
+# Initialize for output file
+pm = ProgressManager("output.csv")
+
+# Save checkpoint (atomic with file locking)
+pm.save_checkpoint(
+    df=results_dataframe,
+    last_index=100,
+    metadata={"total": 500, "timestamp": "..."}
+)
+
+# Load checkpoint on restart
+checkpoint = pm.load_checkpoint()
+if checkpoint:
+    df = checkpoint["df"]
+    last_index = checkpoint["last_index"]
+    # Resume from last_index + 1
+```
+
+**Key Features**:
+- Atomic file writes (write to temp, then rename)
+- File locking to prevent corruption
+- Automatic .bak backup before overwrite
+- Checkpoint stored in `.litrx_checkpoints/` directory
+- Resume capability after crashes
+
+### 7. Task Management System
+
+**Location**: `litrx/task_manager.py`
+
+Provides cancellable long-running operations:
+
+```python
+from litrx.task_manager import CancellableTask, TaskCancelledException
+
+task = CancellableTask()
+
+def long_operation():
+    for i in range(1000):
+        if task.is_cancelled():
+            raise TaskCancelledException("User cancelled")
+        # Do work
+        process_item(i)
+
+# In GUI: Cancel button
+cancel_button.clicked.connect(task.cancel)
+```
+
+**Key Features**:
+- Thread-safe cancellation
+- Automatic executor cleanup
+- Cancellation state tracking
+- Integration with GUI cancel buttons
+
+### 8. Secure Key Management
+
+**Location**: `litrx/key_manager.py`
+
+Optional secure storage using system keyring:
+
+```python
+from litrx.key_manager import KeyManager
+
+km = KeyManager()
+
+# Store API key securely
+km.set_key("openai_api_key", "sk-...")
+
+# Retrieve API key
+api_key = km.get_key("openai_api_key")
+
+# Delete API key
+km.delete_key("openai_api_key")
+```
+
+**Key Features**:
+- Uses system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- Fallback to config files if keyring unavailable
+- Service name: `litrx`
+- Key identifiers: `openai_api_key`, `siliconflow_api_key`
+
+### 9. Custom Exception Hierarchy
+
+**Location**: `litrx/exceptions.py`
+
+Provides clear error messages and better error handling:
+
+```python
+from litrx.exceptions import (
+    LitRxError,              # Base exception
+    ConfigurationError,      # Config-related errors
+    APIKeyMissingError,      # Missing API key
+    APIRequestError,         # API request failures
+    ValidationError,         # Data validation errors
+    FileProcessingError      # File I/O errors
+)
+
+try:
+    client = AIClient(config)
+except APIKeyMissingError as e:
+    # User-friendly message in Chinese with instructions
+    show_error_dialog(str(e))
+```
+
+**Benefits**:
+- User-friendly error messages (often in Chinese)
+- Specific exception types for different error categories
+- Helpful troubleshooting instructions included
+- Better error tracking and logging
+
+### 10. AI-Assisted Configuration Generation
+
+**Location**: `litrx/ai_config_generator.py`
+
+Generate screening modes and matrix dimensions from natural language:
+
+```python
+from litrx.ai_config_generator import AbstractModeGenerator, MatrixDimensionGenerator
+
+# Generate abstract screening mode
+mode_gen = AbstractModeGenerator(config)
+mode_config = mode_gen.generate_mode(
+    description="我想筛选心理学实证研究，需要知道样本量和研究方法",
+    language="zh"
+)
+# Returns: {"mode_name": "...", "criteria": [...], "questions": [...]}
+
+# Generate matrix dimensions
+dim_gen = MatrixDimensionGenerator(config)
+dimensions = dim_gen.generate_dimensions(
+    description="提取研究方法、样本量、主要发现",
+    language="zh"
+)
+# Returns: [{"name": "...", "type": "...", "prompt": "..."}, ...]
+```
+
+**Key Features**:
+- Natural language input (Chinese/English)
+- Uses prompt templates from `litrx/prompts/`
+- Automatic JSON/YAML parsing from AI responses
+- Code fence stripping for clean output
+- Integration with GUI dialogs
+
 ## Common Development Workflows
 
 ### Adding a New GUI Tab (Qt)
@@ -342,6 +552,163 @@ def save_config(self):
 MY_NEW_SETTING=value
 ```
 
+### Using AI-Assisted Configuration Generation (NEW)
+
+**For Abstract Screening Modes**:
+
+1. **Open AI Assistant**: In Abstract Screening tab, click "AI Assistant" button
+2. **Describe Requirements**: Enter natural language description
+   - Example: "我想筛选心理学实证研究，需要知道是否使用实验方法、样本量、是否有对照组"
+3. **Generate**: Click "Generate" button
+4. **Review**: Preview generated JSON configuration
+5. **Apply**: Click "Apply" to save to `questions_config.json`
+
+**Code Integration**:
+```python
+from litrx.ai_config_generator import AbstractModeGenerator
+
+# Initialize generator
+generator = AbstractModeGenerator(config)
+
+# Generate mode from natural language
+mode_config = generator.generate_mode(
+    description="筛选实证研究，关注样本量和研究方法",
+    language="zh"
+)
+
+# Result structure:
+# {
+#     "mode_name": "empirical_research",
+#     "criteria": [
+#         {"question": "是否使用实验方法？", "type": "yes_no"},
+#         {"question": "是否有对照组？", "type": "yes_no"}
+#     ],
+#     "questions": [
+#         {"question": "样本量是多少？", "type": "text"}
+#     ]
+# }
+```
+
+**For Matrix Dimensions**:
+
+1. **Open AI Assistant**: In Matrix tab, click "🤖 AI 生成维度" button
+2. **Describe Dimensions**: Enter what data to extract
+   - Example: "提取研究方法、样本量、主要发现、研究局限"
+3. **Generate**: Click "Generate" button
+4. **Review & Edit**: Use graphical editor to refine dimensions
+5. **Save**: Save to YAML configuration file
+
+**Code Integration**:
+```python
+from litrx.ai_config_generator import MatrixDimensionGenerator
+
+# Initialize generator
+generator = MatrixDimensionGenerator(config)
+
+# Generate dimensions
+dimensions = generator.generate_dimensions(
+    description="提取研究方法、样本量、主要发现",
+    language="zh"
+)
+
+# Result structure:
+# [
+#     {
+#         "name": "research_method",
+#         "display_name": "研究方法",
+#         "type": "single_choice",
+#         "prompt": "识别研究采用的方法",
+#         "options": ["实验", "问卷", "访谈", "其他"]
+#     },
+#     {
+#         "name": "sample_size",
+#         "display_name": "样本量",
+#         "type": "number",
+#         "prompt": "提取样本量数值"
+#     }
+# ]
+```
+
+### Implementing Caching for Performance
+
+To add caching to a new analysis module:
+
+```python
+from litrx.cache import ResultCache
+
+class MyAnalyzer:
+    def __init__(self, config: dict, enable_cache: bool = True):
+        self.config = config
+        self.client = AIClient(config)
+        self.cache = ResultCache() if enable_cache else None
+
+    def analyze_item(self, title: str, abstract: str) -> dict:
+        # Check cache first
+        if self.cache:
+            cached = self.cache.get(title=title, abstract=abstract)
+            if cached:
+                logger.info(f"Cache hit for: {title[:50]}...")
+                return cached
+
+        # Make API call
+        result = self.client.request(
+            messages=[{"role": "user", "content": f"Analyze: {abstract}"}]
+        )
+
+        # Store in cache
+        if self.cache:
+            self.cache.set(
+                title=title,
+                abstract=abstract,
+                result=result,
+                metadata={"analysis_type": "my_analysis"}
+            )
+
+        return result
+```
+
+### Implementing Progress Checkpoints
+
+For long-running batch operations:
+
+```python
+from litrx.progress_manager import ProgressManager
+
+def batch_analysis(input_csv: str, output_csv: str):
+    # Load data
+    df = pd.read_csv(input_csv)
+
+    # Initialize progress manager
+    pm = ProgressManager(output_csv)
+
+    # Try to resume from checkpoint
+    checkpoint = pm.load_checkpoint()
+    if checkpoint:
+        df = checkpoint["df"]
+        start_index = checkpoint["last_index"] + 1
+        logger.info(f"Resuming from index {start_index}")
+    else:
+        start_index = 0
+
+    # Process items
+    for idx in range(start_index, len(df)):
+        # Analyze item
+        df.loc[idx, "result"] = analyze(df.loc[idx])
+
+        # Save checkpoint every 5 items
+        if (idx + 1) % 5 == 0:
+            pm.save_checkpoint(
+                df=df,
+                last_index=idx,
+                metadata={"total": len(df), "timestamp": datetime.now().isoformat()}
+            )
+            logger.info(f"Checkpoint saved at index {idx}")
+
+    # Final save
+    df.to_csv(output_csv, index=False)
+    pm.cleanup()  # Remove checkpoint files
+```
+
 ## Important Code Conventions
 
 ### Style Guidelines (PEP 8)
@@ -371,10 +738,51 @@ MY_NEW_SETTING=value
 - `t(key)`: Get translation
 - `get_i18n()`: Access i18n singleton
 - `load_config(path, defaults)`: Load configuration
-- `AIClient(service, config)`: Create AI client
-- `client.request(prompt, temperature)`: Make AI request
+- `AIClient(config)`: Create AI client (auto-detects service)
+- `client.request(messages=[...])`: Make AI request
+- `ResultCache()`: Initialize result cache
+- `ProgressManager(output_path)`: Initialize progress manager
+- `CancellableTask()`: Create cancellable task
+- `KeyManager()`: Manage secure API keys
+- `get_logger(__name__)`: Get configured logger
+- `resource_path(*parts)`: Get PyInstaller-compatible resource path
 
 ## Critical Implementation Details
+
+### AI Assistant Dialogs (NEW)
+
+**Location**: `litrx/gui/dialogs_qt/ai_mode_assistant_qt.py` and `ai_matrix_assistant_qt.py`
+
+The AI assistant dialogs use **lazy initialization** to prevent crashes when API keys are not configured:
+
+**Pattern**:
+```python
+class AIModeAssistantDialog(QDialog):
+    def __init__(self, parent, config):
+        super().__init__(parent)
+        self.config = config
+        self._generator = None  # ✅ NOT initialized in __init__
+
+    def _generate_config(self):
+        """Called when user clicks Generate button"""
+        try:
+            # Lazy initialization - only create when needed
+            if self._generator is None:
+                self._generator = AbstractModeGenerator(self.config)
+
+            result = self._generator.generate_mode(description, language)
+            # Show result
+        except APIKeyMissingError as e:
+            # Show user-friendly error dialog
+            QMessageBox.critical(self, "错误", str(e))
+```
+
+**Why This Matters**:
+- **Old behavior**: Creating `AIClient` in `__init__` would crash if API key missing
+- **New behavior**: Client created only when user clicks "Generate", with proper error handling
+- **User experience**: Dialog opens successfully, shows helpful error message if key missing
+
+**Testing**: See `TEST_AI_ASSISTANTS.md` for comprehensive testing guide
 
 ### Verification Workflow (Abstract Screening)
 
@@ -642,6 +1050,29 @@ git push -u origin claude/<branch-name>
 
 ## Common Pitfalls & Solutions
 
+### Issue: AI Dialog Crashes on Open
+
+**Problem**: AI assistant dialogs crash immediately when opened without API key
+
+**Solution**: Use lazy initialization pattern:
+```python
+class MyAIDialog(QDialog):
+    def __init__(self, parent, config):
+        super().__init__(parent)
+        self.config = config
+        self._generator = None  # Don't initialize here!
+
+    def _on_generate_click(self):
+        try:
+            if self._generator is None:
+                self._generator = MyGenerator(self.config)
+            result = self._generator.generate(...)
+        except APIKeyMissingError as e:
+            QMessageBox.critical(self, "错误", str(e))
+```
+
+**Reference**: See `litrx/gui/dialogs_qt/ai_mode_assistant_qt.py:62-85`
+
 ### Issue: Import Errors
 
 **Problem**: `ModuleNotFoundError: No module named 'litrx'`
@@ -774,8 +1205,14 @@ title = row[title_col]
 2. **Use existing utilities**: `AIClient`, `load_config`, `t()`, etc.
 3. **Add comprehensive translations**: Both zh and en
 4. **Consider error cases**: Missing files, API errors, invalid input
-5. **Save progress**: Implement interim saves for long operations
-6. **Document in code**: Add docstrings and comments for complex logic
+5. **Use custom exceptions**: Import from `litrx.exceptions` for consistent error handling
+6. **Add logging**: Use `get_logger(__name__)` for trackable operations
+7. **Implement caching**: Use `ResultCache` for AI operations to reduce costs
+8. **Save progress**: Use `ProgressManager` for long operations with checkpoint support
+9. **Enable cancellation**: Use `CancellableTask` for user-cancellable operations
+10. **Document in code**: Add docstrings and comments for complex logic
+11. **Handle lazy initialization**: For AI-related dialogs, initialize clients only when needed
+12. **Use constants**: Import from `litrx.constants` instead of magic numbers
 
 ### When Writing Tests
 
@@ -792,12 +1229,25 @@ title = row[title_col]
 | File | Purpose |
 |------|---------|
 | `litrx/config.py` | Configuration cascade logic |
+| `litrx/config_factory.py` | Configuration factory patterns |
 | `litrx/i18n.py` | Internationalization system |
 | `litrx/ai_client.py` | AI provider wrapper |
+| `litrx/ai_config_generator.py` | AI-assisted config generation |
+| `litrx/cache.py` | Result caching system |
+| `litrx/progress_manager.py` | Atomic checkpoint management |
+| `litrx/task_manager.py` | Cancellable task management |
+| `litrx/key_manager.py` | Secure API key storage |
+| `litrx/exceptions.py` | Custom exception hierarchy |
+| `litrx/constants.py` | Project-wide constants |
+| `litrx/utils.py` | Shared utility functions |
+| `litrx/logging_config.py` | Logging configuration |
+| `litrx/resources.py` | Resource path helper |
 | `litrx/gui/base_window_qt.py` | GUI base class with shared controls (PyQt6) |
+| `litrx/gui/dialogs_qt/ai_mode_assistant_qt.py` | AI assistant for screening modes |
+| `litrx/gui/dialogs_qt/ai_matrix_assistant_qt.py` | AI assistant for matrix dimensions |
 | `litrx/csv_analyzer.py` | CSV relevance scoring |
 | `litrx/abstract_screener.py` | Abstract screening with verification |
-| `litrx/matrix_analyzer.py` | Literature matrix analysis (NEW) |
+| `litrx/matrix_analyzer.py` | Literature matrix analysis |
 | `prompts_config.json` | AI prompt templates |
 | `questions_config.json` | Abstract screening modes |
 | `configs/config.yaml` | Default configuration |
@@ -816,8 +1266,44 @@ config = load_config("path/to/config.yaml", DEFAULT_CONFIG)
 
 # AI Client
 from litrx.ai_client import AIClient
-client = AIClient("openai", config)
-response = client.request(prompt="...", temperature=0.3)
+client = AIClient(config)  # Auto-detects service from config
+response = client.request(messages=[{"role": "user", "content": "..."}])
+
+# Caching
+from litrx.cache import ResultCache
+cache = ResultCache()
+result = cache.get(title="...", abstract="...")
+
+# Progress Management
+from litrx.progress_manager import ProgressManager
+pm = ProgressManager("output.csv")
+pm.save_checkpoint(df, last_index=100)
+
+# Task Cancellation
+from litrx.task_manager import CancellableTask
+task = CancellableTask()
+task.cancel()  # Call from cancel button
+
+# Secure Keys
+from litrx.key_manager import KeyManager
+km = KeyManager()
+km.set_key("openai_api_key", "sk-...")
+
+# Exceptions
+from litrx.exceptions import APIKeyMissingError, APIRequestError
+try:
+    client = AIClient(config)
+except APIKeyMissingError as e:
+    show_error(str(e))
+
+# Logging
+from litrx.logging_config import get_logger
+logger = get_logger(__name__)
+logger.info("Processing started")
+
+# Resources (PyInstaller-compatible)
+from litrx.resources import resource_path
+config_path = resource_path("configs", "config.yaml")
 
 # File I/O
 import pandas as pd
@@ -884,15 +1370,54 @@ def _on_complete(self, result):
 
 - **Architecture Deep Dive**: `docs/ARCHITECTURE.md`
 - **Developer Guide**: `AGENTS.md`
+- **AI-Assisted Config Design**: `docs/AI_ASSISTED_CONFIG_DESIGN.md`
+- **AI-Assisted Config Implementation**: `docs/AI_ASSISTED_CONFIG_IMPLEMENTATION_PLAN.md`
+- **GPT-5 Model Guide**: `docs/GPT5_GUIDE.md`
+- **AI Assistant Testing**: `TEST_AI_ASSISTANTS.md`
 - **User Documentation**: `README.md` (English), `Chinese_README.md`
 - **Example Test**: `tests/test_abstract_verification.py`
+- **AI Dialog Test Script**: `test_ai_dialogs.py`
 
 ## Changelog
 
-### Version 0.1.0 (Current)
+### Version 0.2.0 (Current - November 2024)
+**Major Features**:
+- 🤖 **AI-Assisted Configuration**: Generate screening modes and matrix dimensions from natural language
+  - `ai_mode_assistant_qt.py` - Natural language to screening mode
+  - `ai_matrix_assistant_qt.py` - Natural language to matrix dimensions
+  - Prompt templates in `litrx/prompts/`
+- 💾 **Result Caching**: Intelligent caching system to reduce API costs
+  - SHA256-based cache keys
+  - Configurable TTL (default 30 days)
+  - Stored in `~/.litrx/cache/`
+- 📊 **Progress Management**: Atomic checkpoints with automatic recovery
+  - File locking to prevent corruption
+  - Automatic .bak backups
+  - Resume capability after crashes
+- 🔐 **Secure Key Management**: Optional keyring integration
+  - macOS Keychain, Windows Credential Manager, Linux Secret Service
+  - Fallback to config files
+- ⚙️ **Enhanced Architecture**:
+  - Custom exception hierarchy with user-friendly messages
+  - Centralized logging with rotation
+  - Cancellable task management
+  - Project-wide constants
+  - Utility functions for common patterns
+  - PyInstaller resource path helper
+- 🎨 **UI Improvements**:
+  - Enhanced dimension editor (v2) with graphical interface
+  - Lazy initialization for dialogs (prevents crashes)
+  - Better error handling and user feedback
+
+**Infrastructure**:
+- New dependencies: `keyring`, `pydantic>=2.0`, `filelock>=3.12.0`
+- ~7000+ LOC (up from ~4000)
+- Comprehensive documentation for AI-assisted features
+
+### Version 0.1.0 (Initial Release)
 - CSV relevance analysis
 - Abstract screening with verification
-- Literature matrix analysis (NEW - replaces PDF screening)
+- Literature matrix analysis
 - PDF screening (LEGACY)
 - Bilingual GUI (Chinese/English)
 - Multi-provider AI support (OpenAI, SiliconFlow)
@@ -900,17 +1425,20 @@ def _on_complete(self, result):
 ### Known Limitations
 - Minimal test coverage (~5%)
 - No LICENSE file
-- No async/await for concurrent API calls
-- No result caching
+- No async/await for concurrent API calls (uses threading)
 - PDF screener superseded by matrix analyzer
+- AI assistant dialogs require API key configuration
 
 ### Future Enhancements
-- Complete tab internationalization
-- Configuration schema validation
+- Complete test coverage (target: 80%+)
+- Async/await for parallel API calls
+- Configuration schema validation with pydantic
 - Plugin system for custom screening modes
-- Batch processing with parallelization
-- Result caching to reduce API costs
+- Advanced caching strategies (with cache warming)
 - Customizable export templates
+- Batch processing with parallelization
+- Integration with more AI providers
+- Desktop notifications for long-running tasks
 
 ---
 
