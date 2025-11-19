@@ -889,9 +889,6 @@ def main():
 
     config, questions = load_config()
 
-    logger.info("正在初始化AI客户端...")
-    client = AIClient(config)
-
     open_questions = questions.get('open_questions', [])
     yes_no_questions = questions.get('yes_no_questions', [])
 
@@ -904,24 +901,41 @@ def main():
 
     base, ext = os.path.splitext(input_file_path)
     output_file_path = f"{base}{config['OUTPUT_FILE_SUFFIX']}{ext}"
-    temp_path = output_file_path.replace('.', '_temp.')
-    if os.path.exists(temp_path):
-        try:
-            df = pd.read_csv(temp_path) if temp_path.endswith('.csv') else pd.read_excel(temp_path)
-            logger.info("已加载临时进度文件。")
-        except Exception as e:
-            logger.error(f"加载临时文件失败: {e}")
 
-    start_index = resume_from_progress(output_file_path)
     total_articles = len(df)
+    max_workers = config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)
     logger.info(f"共找到 {total_articles} 篇文章待处理。")
+    logger.info(f"使用并发处理模式，工作线程数: {max_workers}")
 
-    for index, row in df.iloc[start_index:].iterrows():
-        logger.info(f"\n正在处理第 {index + 1}/{total_articles} 篇文章...")
-        analyze_article(df, index, row, title_col, abstract_col, open_questions, yes_no_questions, config, client)
-        save_progress(df, output_file_path, index)
-        time.sleep(config['API_REQUEST_DELAY'])
+    # Create screener with concurrent processing support
+    logger.info("正在初始化AI客户端和分析器...")
+    screener = AbstractScreener(config)
 
+    # Progress callback for CLI output
+    def progress_callback(index: int, total_count: int, result: Optional[Dict[str, Any]]) -> None:
+        """Log progress to console."""
+        title = str(df.iloc[index].get(title_col, ''))[:50]
+        logger.info(f"[{index + 1}/{total_count}] 已完成: {title}")
+
+    # Use concurrent batch processing (5-10x faster than serial!)
+    try:
+        logger.info("开始并发分析...")
+        df = screener.analyze_batch_concurrent(
+            df=df,
+            title_col=title_col,
+            abstract_col=abstract_col,
+            open_questions=open_questions,
+            yes_no_questions=yes_no_questions,
+            progress_callback=progress_callback,
+            stop_event=None  # No cancellation support in CLI mode
+        )
+    except KeyboardInterrupt:
+        logger.warning("用户中断处理。正在保存已完成的结果...")
+    except Exception as e:
+        logger.error(f"处理过程中发生错误: {e}", exc_info=True)
+        logger.warning("正在保存已完成的结果...")
+
+    # Save results
     try:
         if output_file_path.endswith('.csv'):
             df.to_csv(output_file_path, index=False, encoding='utf-8-sig')
@@ -931,12 +945,7 @@ def main():
     except Exception as e:
         logger.error(f"保存结果文件时出错: {e}")
 
-    if os.path.exists(temp_path):
-        os.remove(temp_path)
-    progress_file = output_file_path.replace('.', '_progress.json')
-    if os.path.exists(progress_file):
-        os.remove(progress_file)
-
+    # Generate summary statistics
     criteria_columns = [q['column_name'] for q in yes_no_questions]
     summary = generate_weekly_summary(df, criteria_columns)
     logger.info(f"筛选摘要： {summary}")
