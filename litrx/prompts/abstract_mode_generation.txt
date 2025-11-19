@@ -1,5 +1,4 @@
 You are an expert in academic literature screening and research methodology.
-Your task is to help researchers create abstract screening configurations.
 
 The user wants to create a literature screening mode with the following requirements:
 
@@ -29,97 +28,47 @@ Please generate a screening mode configuration in JSON format with this exact st
 }}
 
 Guidelines:
-1. Use yes/no questions for binary judgments (e.g., "Is this empirical research?", "Does it use survey methods?")
-2. Use open questions for extractive or descriptive information (e.g., "What are the main findings?", "What is the sample size?")
-3. Make questions clear, specific, and professionally worded for academic literature analysis
-4. Generate keys in English snake_case format (e.g., "sample_size", "has_control_group", "is_empirical")
-5. Generate questions and column names in {language}
-6. Ensure the mode_key is descriptive and unique (based on research domain or purpose)
-7. Aim for 3-6 yes/no questions and 2-4 open questions for optimal usability
-8. Questions should be answerable from titles and abstracts
-9. Output ONLY the JSON object, no markdown formatting, no explanations
+1. Use yes/no questions for binary judgments (e.g., "Is this empirical research?", "Does it use surveys?")
+2. Use open questions for extractive/descriptive information (e.g., "What are the main findings?", "What is the sample size?")
+3. Make questions clear, specific, professionally worded
+4. Generate keys in English snake_case (e.g., "sample_size", "has_control_group", "is_empirical")
+5. Generate questions and column names in {language} (Chinese if zh, English if en)
+6. Aim for 3-6 yes/no questions and 2-4 open questions for usability
+7. Ensure mode_key is descriptive and unique
+8. Output ONLY the JSON object, no markdown code blocks, no explanations before or after
 
-Example for reference:
+Example 1 (Chinese):
+User description: "我需要筛选心理学实证研究。需要判断是否使用了实验方法，是否有对照组，并提取样本量和主要发现。"
+Your output:
+{{
+  "mode_key": "psychology_empirical_screening",
+  "description": "心理学实证研究筛选",
+  "yes_no_questions": [
+    {{"key": "is_empirical", "question": "这是否为实证研究？", "column_name": "实证研究"}},
+    {{"key": "uses_experimental", "question": "是否使用了实验方法？", "column_name": "实验方法"}},
+    {{"key": "has_control_group", "question": "是否有对照组？", "column_name": "对照组"}}
+  ],
+  "open_questions": [
+    {{"key": "sample_size", "question": "样本量是多少？", "column_name": "样本量"}},
+    {{"key": "main_findings", "question": "主要研究发现是什么？", "column_name": "主要发现"}}
+  ]
+}}
 
-Input (Chinese):
-"我需要筛选关于消费者行为的实证研究。需要判断是否使用了问卷调查法，是否在中国情境下开展，并提取研究的主要发现和理论框架。"
-
-Output:
+Example 2 (Chinese):
+User description: "我想筛选关于消费者行为的实证研究。需要判断是否使用了问卷调查法，是否在中国情境下开展，并提取研究的主要发现和理论框架。"
+Your output:
 {{
   "mode_key": "consumer_behavior_empirical",
   "description": "消费者行为实证研究筛选",
   "yes_no_questions": [
-    {{
-      "key": "is_empirical",
-      "question": "这是否为实证研究？",
-      "column_name": "实证研究"
-    }},
-    {{
-      "key": "uses_survey",
-      "question": "是否使用了问卷调查法？",
-      "column_name": "问卷调查"
-    }},
-    {{
-      "key": "chinese_context",
-      "question": "是否在中国情境下开展？",
-      "column_name": "中国情境"
-    }},
-    {{
-      "key": "consumer_focus",
-      "question": "是否与消费者行为相关？",
-      "column_name": "消费者行为"
-    }}
+    {{"key": "is_empirical", "question": "这是否为实证研究？", "column_name": "实证研究"}},
+    {{"key": "uses_survey", "question": "是否使用了问卷调查法？", "column_name": "问卷调查"}},
+    {{"key": "chinese_context", "question": "是否在中国情境下开展？", "column_name": "中国情境"}}
   ],
   "open_questions": [
-    {{
-      "key": "main_findings",
-      "question": "研究的主要发现是什么？",
-      "column_name": "主要发现"
-    }},
-    {{
-      "key": "theoretical_framework",
-      "question": "使用了什么理论框架？",
-      "column_name": "理论框架"
-    }}
+    {{"key": "main_findings", "question": "研究的主要发现是什么？", "column_name": "主要发现"}},
+    {{"key": "theoretical_framework", "question": "使用了什么理论框架？", "column_name": "理论框架"}}
   ]
 }}
 
-Input (English):
-"I need to screen empirical studies about machine learning applications. I want to know if they use deep learning, whether they have benchmarks, and what datasets they use."
-
-Output:
-{{
-  "mode_key": "ml_application_empirical",
-  "description": "Machine learning application studies screening",
-  "yes_no_questions": [
-    {{
-      "key": "is_empirical",
-      "question": "Is this an empirical study?",
-      "column_name": "Empirical Study"
-    }},
-    {{
-      "key": "uses_deep_learning",
-      "question": "Does it use deep learning methods?",
-      "column_name": "Deep Learning"
-    }},
-    {{
-      "key": "has_benchmarks",
-      "question": "Does it include benchmark comparisons?",
-      "column_name": "Has Benchmarks"
-    }}
-  ],
-  "open_questions": [
-    {{
-      "key": "datasets_used",
-      "question": "What datasets are used in the study?",
-      "column_name": "Datasets"
-    }},
-    {{
-      "key": "ml_methods",
-      "question": "What machine learning methods are employed?",
-      "column_name": "ML Methods"
-    }}
-  ]
-}}
-
-Now generate the configuration for the user's requirements above.
+Now generate the configuration for the user's requirements above. Output ONLY the JSON, nothing else.

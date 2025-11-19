@@ -103,6 +103,7 @@ class DimensionEditorDialog:
         left_btns.pack(side=tk.LEFT)
 
         ttk.Button(left_btns, text="➕ 添加", command=self._add_dimension, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(left_btns, text="🤖 AI 辅助创建", command=self._ai_assist_create, width=15).pack(side=tk.LEFT, padx=2)
         ttk.Button(left_btns, text="✏️ 编辑", command=self._edit_dimension, width=10).pack(side=tk.LEFT, padx=2)
         ttk.Button(left_btns, text="🗑️ 删除", command=self._delete_dimension, width=10).pack(side=tk.LEFT, padx=2)
 
@@ -154,6 +155,28 @@ class DimensionEditorDialog:
         if editor.result:
             self.dimensions.append(editor.result)
             self._populate_list()
+
+    def _ai_assist_create(self) -> None:
+        """Open AI assistant for dimension creation."""
+        from .ai_dimension_assistant import AIDimensionAssistantDialog
+
+        # Get configuration from parent window if it has build_config method
+        # Otherwise use empty config (will need API keys from env)
+        config = getattr(self.parent, 'build_config', lambda: {})()
+
+        # Open AI assistant dialog
+        dialog = AIDimensionAssistantDialog(self.dialog, config)
+        self.dialog.wait_window(dialog.dialog)
+
+        # Handle result
+        if dialog.result:
+            # Add selected dimensions to the list
+            self.dimensions.extend(dialog.result)
+            self._populate_list()
+            messagebox.showinfo(
+                "成功",
+                f"成功添加 {len(dialog.result)} 个维度！"
+            )
 
     def _edit_dimension(self) -> None:
         """Edit selected dimension."""
