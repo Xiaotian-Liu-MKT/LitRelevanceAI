@@ -665,7 +665,13 @@ class AbstractScreener:
         """
         columns_dict = results.get("columns", {})
         if not columns_dict:
-            logger.warning(f"Article {index}: No columns in results, expected {len(open_questions) + len(yes_no_questions)} result columns")
+            expected_cols = len(open_questions) + len(yes_no_questions)
+            logger.warning(
+                f"Article {index}: No columns in results. "
+                f"Expected {expected_cols} result columns "
+                f"(open: {len(open_questions)}, yes/no: {len(yes_no_questions)}). "
+                f"Results dict keys: {list(results.keys())}"
+            )
             return
 
         applied_count = 0
@@ -714,7 +720,14 @@ class AbstractScreener:
 
         Raises:
             KeyboardInterrupt: If stop_event is set
+            ValueError: If no questions are configured
         """
+        # Validate that questions exist
+        if not open_questions and not yes_no_questions:
+            error_msg = "No questions configured for screening. Please add questions to the selected mode."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
         max_workers = self.config.get('MAX_WORKERS', DEFAULT_MAX_WORKERS)
         task_timeout = self.config.get('TASK_TIMEOUT_SECONDS', 300)  # 5 minutes default
         total = len(df)

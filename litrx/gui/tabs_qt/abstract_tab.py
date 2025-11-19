@@ -213,7 +213,6 @@ class AbstractScreeningWorker(QThread):
                     df.to_excel(output_file_path, index=False)
 
                 # Verify file was saved
-                import os
                 if os.path.exists(output_file_path):
                     file_size = os.path.getsize(output_file_path)
                     self.append_log.emit(f"✓ 文件已保存，大小: {file_size} bytes")
