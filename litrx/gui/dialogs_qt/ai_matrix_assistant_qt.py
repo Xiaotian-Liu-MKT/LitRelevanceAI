@@ -23,6 +23,7 @@ class AIMatrixAssistantDialog(QDialog):
         self._config = config
         self._generator: Optional[MatrixDimensionGenerator] = None
         self.result: Optional[List[Dict[str, Any]]] = None
+        self._closed = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -70,6 +71,8 @@ class AIMatrixAssistantDialog(QDialog):
                 lang = self._config.get("LANGUAGE", "zh")
                 dims = self._generator.generate_dimensions(desc, lang)
                 def ok():
+                    if self._closed or not self.isVisible():
+                        return
                     self.result = dims
                     self.preview.setPlainText(yaml_pretty({"dimensions": dims}))
                     self.status.setText(t("generation_success") or "Generation succeeded")
@@ -77,9 +80,10 @@ class AIMatrixAssistantDialog(QDialog):
                 self._invoke(ok)
             except Exception as e:
                 def err():
+                    if self._closed:
+                        return
                     self.status.setText(t("generation_failed") or "Generation failed")
                     error_msg = str(e)
-                    # Provide helpful message for API key issues
                     if "API key" in error_msg or "not configured" in error_msg:
                         error_msg = f"{error_msg}\n\n请在主窗口配置 API 密钥。\nPlease configure API key in the main window."
                     QMessageBox.critical(self, t("error") or "Error", error_msg)
@@ -96,6 +100,10 @@ class AIMatrixAssistantDialog(QDialog):
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(0, fn)
 
+    def reject(self) -> None:
+        self._closed = True
+        return super().reject()
+
 
 def yaml_pretty(obj: Dict[str, Any]) -> str:
     try:
@@ -103,4 +111,3 @@ def yaml_pretty(obj: Dict[str, Any]) -> str:
         return yaml.safe_dump(obj, allow_unicode=True, sort_keys=False)
     except Exception:
         return str(obj)
-

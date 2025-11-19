@@ -104,6 +104,7 @@ class AIClient:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
+                timeout=self.config.get("AI_TIMEOUT_SECONDS", 60),
                 **sanitized
             )
 
@@ -125,6 +126,7 @@ class AIClient:
                     response = self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
+                        timeout=self.config.get("AI_TIMEOUT_SECONDS", 60),
                         **retry_kwargs
                     )
                     return response.model_dump()

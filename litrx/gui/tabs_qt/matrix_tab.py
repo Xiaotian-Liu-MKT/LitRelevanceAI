@@ -31,6 +31,7 @@ from ...matrix_analyzer import (
 )
 from ...i18n import get_i18n, t
 from ..dialogs_qt.ai_matrix_assistant_qt import AIMatrixAssistantDialog
+from ..dialogs_qt.dimensions_editor_qt import DimensionsEditorDialog
 
 if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
@@ -69,6 +70,7 @@ class MatrixTab(QWidget):
 
         btn_layout = QHBoxLayout()
         self.edit_dim_btn = QPushButton("✏️ 编辑维度 / Edit Dimensions")
+        self.edit_dim_btn.clicked.connect(self._open_dimensions_editor)
         btn_layout.addWidget(self.edit_dim_btn)
 
         self.ai_dims_btn = QPushButton("🤖 AI 生成维度 / AI Dims")
@@ -242,6 +244,14 @@ class MatrixTab(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._load_default_config()
+
+    def _open_dimensions_editor(self) -> None:
+        """Open YAML text editor for current dimensions."""
+        dlg = DimensionsEditorDialog(self, self.matrix_config or {"dimensions": []})
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
+            self.matrix_config = dlg.result
+            dim_count = len(self.matrix_config.get("dimensions", []))
+            self.dim_count_label.setText(f"当前维度数：{dim_count} / Current Dimensions: {dim_count}")
 
     def _save_as_preset(self) -> None:
         """Save current config as a preset YAML file."""

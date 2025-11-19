@@ -22,6 +22,7 @@ class AIModeAssistantDialog(QDialog):
         self.resize(760, 560)
         self._config = config
         self._generator: Optional[AbstractModeGenerator] = None
+        self._closed = False
         self.result: Optional[Dict[str, Any]] = None
         self._build_ui()
 
@@ -76,6 +77,8 @@ class AIModeAssistantDialog(QDialog):
                 lang = self._config.get("LANGUAGE", "zh")
                 data = self._generator.generate_mode(desc, lang)
                 def ok():
+                    if self._closed or not self.isVisible():
+                        return
                     self.result = data
                     self.preview.setPlainText(json_pretty(data))
                     self.status.setText(t("generation_success") or "Generation succeeded")
@@ -84,6 +87,8 @@ class AIModeAssistantDialog(QDialog):
                 self._invoke(ok)
             except Exception as e:
                 def err():
+                    if self._closed:
+                        return
                     self.status.setText(t("generation_failed") or "Generation failed")
                     error_msg = str(e)
                     # Provide helpful message for API key issues
@@ -105,6 +110,11 @@ class AIModeAssistantDialog(QDialog):
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(0, fn)
 
+    def reject(self) -> None:
+        # mark closed to avoid unsafe UI updates from worker
+        self._closed = True
+        return super().reject()
+
 
 def json_pretty(obj: Dict[str, Any]) -> str:
     import json
@@ -112,4 +122,3 @@ def json_pretty(obj: Dict[str, Any]) -> str:
         return json.dumps(obj, ensure_ascii=False, indent=2)
     except Exception:
         return str(obj)
-
