@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -276,7 +277,6 @@ class MatrixTab(QWidget):
 
     def _open_ai_dims(self) -> None:
         """Open AI assistant to generate dimensions and merge into current config."""
-        from PyQt6.QtWidgets import QDialog
         dlg = AIMatrixAssistantDialog(self, self.parent_window.build_config())
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             dims = self.matrix_config.get('dimensions', []) or []
