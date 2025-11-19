@@ -1,5 +1,21 @@
 # LitRelevanceAI Architecture (PyQt6)
 
+## Documentation Map
+
+This architecture document is part of a comprehensive documentation suite:
+
+- **[CLAUDE.md](../CLAUDE.md)** - AI Assistant guide with patterns, workflows, and conventions
+- **[AGENTS.md](../AGENTS.md)** - Developer guide for human and AI developers
+- **[CODE_QUALITY_ACTION_PLAN.md](../CODE_QUALITY_ACTION_PLAN.md)** - Code quality improvement roadmap
+- **[IMPLEMENTATION_PROGRESS.md](../IMPLEMENTATION_PROGRESS.md)** - Implementation progress tracking
+- **[项目功能与架构概览.md](项目功能与架构概览.md)** - Chinese architecture overview
+- **[AI_ASSISTED_CONFIG_DESIGN.md](AI_ASSISTED_CONFIG_DESIGN.md)** - AI-assisted configuration design
+- **[README.md](../README.md)** / **[Chinese_README.md](../Chinese_README.md)** - User documentation
+
+For AI assistants working on this codebase, **start with CLAUDE.md** for comprehensive guidance.
+
+---
+
 ## Overview
 
 LitRelevanceAI is an AI-assisted toolkit for screening and analyzing academic literature. It supports CLI and a modern PyQt6 GUI, with OpenAI-compatible providers (OpenAI and SiliconFlow). The codebase emphasizes modular analysis pipelines, internationalization (i18n), and robust configuration management. Packaging scripts enable click-to-run apps for non-developers.
