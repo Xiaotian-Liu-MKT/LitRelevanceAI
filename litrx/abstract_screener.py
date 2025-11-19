@@ -27,6 +27,7 @@ from .logging_config import get_logger
 from .prompt_builder import PromptBuilder
 from .utils import AIResponseParser
 from .resources import resource_path
+from .exceptions import ConfigurationError, FileProcessingError, ValidationError
 
 
 load_env_file()
@@ -124,16 +125,49 @@ def load_config(path: Optional[str] = None, mode: Optional[str] = None) -> Tuple
     return config, questions
 
 def get_file_path_from_config(config):
-    file_path = config['INPUT_FILE_PATH']
+    """Get and validate file path from configuration.
+
+    Args:
+        config: Configuration dictionary containing INPUT_FILE_PATH
+
+    Returns:
+        str: Validated file path
+
+    Raises:
+        ConfigurationError: If file path is not configured or invalid
+        FileProcessingError: If file doesn't exist or has unsupported format
+    """
+    file_path = config.get('INPUT_FILE_PATH', '')
+
     if not file_path or file_path == 'your_input_file.xlsx':
-         logger.error("错误：输入文件路径未在CONFIG中正确配置。")
-         sys.exit(1)
+        raise ConfigurationError(
+            "输入文件路径未配置",
+            help_text=(
+                "请通过以下方式之一配置 INPUT_FILE_PATH：\n"
+                "1. 在GUI中选择文件\n"
+                "2. 在 configs/config.yaml 中设置\n"
+                "3. 在 .env 文件中添加：INPUT_FILE_PATH=/path/to/file.csv\n\n"
+                "示例配置：\n"
+                "INPUT_FILE_PATH: /home/user/papers.csv"
+            )
+        )
+
     if not os.path.exists(file_path):
-        logger.error(f"错误：配置文件中指定的文件路径 '{file_path}' 不存在。")
-        sys.exit(1)
-    if not (file_path.endswith('.csv') or file_path.endswith('.xlsx')):
-        logger.error(f"错误：文件 '{file_path}' 不是支持的CSV或Excel格式。")
-        sys.exit(1)
+        raise FileProcessingError(
+            f"配置的文件路径不存在: {file_path}\n\n"
+            f"请检查：\n"
+            f"1. 路径拼写是否正确\n"
+            f"2. 文件是否已被移动或删除\n"
+            f"3. 是否有文件访问权限"
+        )
+
+    if not (file_path.endswith('.csv') or file_path.endswith('.xlsx') or file_path.endswith('.xls')):
+        raise FileProcessingError(
+            f"不支持的文件格式: {file_path}\n\n"
+            f"支持的格式：.csv, .xlsx, .xls\n"
+            f"当前文件扩展名：{os.path.splitext(file_path)[1]}"
+        )
+
     return file_path
 
 def load_and_validate_data(file_path, config, title_column=None, abstract_column=None):

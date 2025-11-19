@@ -15,7 +15,16 @@ class LitRxError(Exception):
 
 class ConfigurationError(LitRxError):
     """Configuration-related errors."""
-    pass
+
+    def __init__(self, message: str, help_text: Optional[str] = None):
+        """Initialize ConfigurationError with optional help text.
+
+        Args:
+            message: Error message
+            help_text: Optional helpful information for resolving the error
+        """
+        super().__init__(message)
+        self.help_text = help_text
 
 
 class APIKeyMissingError(ConfigurationError):
@@ -174,3 +183,24 @@ class RateLimitError(APIRequestError):
             pass
 
         super().__init__(RateLimitException(message), service)
+
+
+# Additional exception types for code quality plan compatibility
+
+class FileProcessingError(LitRxError):
+    """Errors related to file I/O and processing."""
+
+    def __init__(self, message: str, help_text: Optional[str] = None):
+        """Initialize FileProcessingError with optional help text."""
+        super().__init__(message)
+        self.help_text = help_text
+
+
+class APIError(LitRxError):
+    """Errors related to AI API calls (alias for APIRequestError compatibility)."""
+    pass
+
+
+class ValidationError(LitRxError):
+    """Errors related to data validation (alias for DataValidationError compatibility)."""
+    pass

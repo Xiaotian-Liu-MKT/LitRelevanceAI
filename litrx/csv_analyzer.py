@@ -21,6 +21,7 @@ from .constants import CHECKPOINT_INTERVAL, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from .logging_config import get_logger
 from .utils import AIResponseParser, ColumnDetector
 from .resources import resource_path
+from .exceptions import FileProcessingError, APIError, ValidationError
 
 
 load_env_file()
@@ -100,7 +101,7 @@ Please return in the following JSON format:
                 df['Title'] = df[title_col]
             if abstract_col != 'Abstract':
                 df['Abstract'] = df[abstract_col]
-            
+
             # Add columns for analysis results
             if 'Relevance Score' not in df.columns:
                 df['Relevance Score'] = None
@@ -108,10 +109,25 @@ Please return in the following JSON format:
                 df['Analysis Result'] = None
             if 'Literature Review Suggestion' not in df.columns:
                 df['Literature Review Suggestion'] = None
-        
+
             return df
+        except FileNotFoundError as e:
+            raise FileProcessingError(
+                f"CSV文件未找到: {file_path}"
+            ) from e
+        except pd.errors.ParserError as e:
+            raise FileProcessingError(
+                f"CSV格式错误，请检查文件格式。错误详情: {str(e)}"
+            ) from e
+        except pd.errors.EmptyDataError as e:
+            raise FileProcessingError(
+                f"CSV文件为空: {file_path}"
+            ) from e
         except Exception as e:
-            raise Exception(f"Failed to read CSV file: {str(e)}")
+            logger.error(f"读取CSV时发生未预期错误: {e}", exc_info=True)
+            raise FileProcessingError(
+                f"无法读取CSV文件: {str(e)}"
+            ) from e
 
     def analyze_paper(self, title: str, abstract: str) -> Dict:
         """Analyze the relevance of a single paper to the research topic"""
@@ -146,8 +162,21 @@ Please return in the following JSON format:
                 self.cache.set(title, abstract, result, cache_key)
 
             return result
+        except KeyError as e:
+            logger.error(f"AI响应格式错误: {e}", exc_info=True)
+            raise APIError(
+                f"AI响应格式错误，无法提取内容。请检查模型配置。"
+            ) from e
+        except (ConnectionError, TimeoutError) as e:
+            logger.error(f"AI请求网络错误: {e}", exc_info=True)
+            raise APIError(
+                f"AI请求失败：网络连接超时或中断。请检查网络连接。"
+            ) from e
         except Exception as e:
-            raise Exception(f"Failed to analyze paper: {str(e)}")
+            logger.error(f"分析文献时发生错误: {e}", exc_info=True)
+            raise APIError(
+                f"分析文献失败: {str(e)}"
+            ) from e
     def batch_analyze(self, df: pd.DataFrame, original_file_path: str, progress_callback=None, use_checkpoint=True) -> List[Dict]:
         """Batch analyze multiple papers with thread-safe updates and progress checkpoints.
 
@@ -277,7 +306,7 @@ Please return in the following JSON format:
             file_dir = os.path.dirname(original_file_path)
             file_name = os.path.splitext(os.path.basename(original_file_path))[0]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
+
             if is_interim:
                 # Temporarily save for interim state, overwrite with fixed name
                 new_file_path = os.path.join(file_dir, f"{file_name}_analyzed_interim.csv")
@@ -290,8 +319,25 @@ Please return in the following JSON format:
 
             if not is_interim:
                 logger.info(f"\nAnalysis results saved to: {os.path.abspath(new_file_path)}")
+        except PermissionError as e:
+            logger.error(f"权限错误：无法写入文件: {e}", exc_info=True)
+            raise FileProcessingError(
+                f"无法保存结果文件，权限不足。\n"
+                f"请确保：\n"
+                f"1. 目标文件夹有写入权限\n"
+                f"2. 文件未被其他程序占用"
+            ) from e
+        except OSError as e:
+            logger.error(f"文件系统错误: {e}", exc_info=True)
+            raise FileProcessingError(
+                f"保存结果文件时发生错误: {str(e)}\n"
+                f"可能是磁盘空间不足或路径无效。"
+            ) from e
         except Exception as e:
-            logger.error(f"Error saving results: {str(e)}")
+            logger.error(f"保存结果时发生未知错误: {e}", exc_info=True)
+            raise FileProcessingError(
+                f"保存结果失败: {str(e)}"
+            ) from e
 
 
 def get_user_input():
