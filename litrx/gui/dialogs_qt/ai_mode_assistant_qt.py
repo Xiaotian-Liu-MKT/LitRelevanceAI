@@ -3,13 +3,16 @@ from __future__ import annotations
 import threading
 from typing import Any, Dict, Optional
 
+import os
+import sys
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QTextEdit, QPushButton,
+    QDialog, QVBoxLayout, QLabel, QTextEdit, QPlainTextEdit, QPushButton,
     QHBoxLayout, QMessageBox
 )
 
 from ...ai_config_generator import AbstractModeGenerator
 from ...i18n import t
+from ..widgets.ime_text_edit import IMEPlainTextEdit
 
 
 class AIModeAssistantDialog(QDialog):
@@ -31,10 +34,19 @@ class AIModeAssistantDialog(QDialog):
         lay.addWidget(QLabel(t("ai_mode_guide") or "Describe your screening needs in natural language."))
 
         lay.addWidget(QLabel(t("describe_your_needs") or "Your description:"))
-        self.input_text = QTextEdit()
-        # Enable input method support for Chinese and other languages
+        # Prefer IME-friendly plain text editor (especially on macOS)
+        use_plain = (os.getenv("LITRX_USE_PLAIN_TEXT_INPUT") == "1") or (sys.platform == "darwin")
         from PyQt6.QtCore import Qt
+        self.input_text = IMEPlainTextEdit() if use_plain else QTextEdit()
+        # Enable input method support and avoid rich text parsing
         self.input_text.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
+        if isinstance(self.input_text, QTextEdit):
+            try:
+                self.input_text.setAcceptRichText(False)
+                self.input_text.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            except Exception:
+                pass
+        self.input_text.setPlaceholderText(t("describe_your_needs_placeholder") or "请在此输入中文描述…")
         lay.addWidget(self.input_text)
 
         btns = QHBoxLayout()
@@ -62,6 +74,13 @@ class AIModeAssistantDialog(QDialog):
         self.preview.setReadOnly(True)
         lay.addWidget(self.preview)
 
+    def showEvent(self, event):  # noqa: N802
+        try:
+            self.input_text.setFocus()
+        except Exception:
+            pass
+        return super().showEvent(event)
+
     def _on_generate(self) -> None:
         desc = self.input_text.toPlainText().strip()
         if not desc:
@@ -78,6 +97,9 @@ class AIModeAssistantDialog(QDialog):
                     self._generator = AbstractModeGenerator(self._config)
 
                 lang = self._config.get("LANGUAGE", "zh")
+                from ...logging_config import get_logger as _get_logger
+                _log = _get_logger(__name__)
+                _log.info("AIModeAssistant: generation started (lang=%s)", lang)
                 data = self._generator.generate_mode(desc, lang)
                 def ok():
                     if self._closed or not self.isVisible():
@@ -85,6 +107,7 @@ class AIModeAssistantDialog(QDialog):
                         if not self._closed:
                             self.gen_btn.setEnabled(True)
                         return
+                    _log.info("AIModeAssistant: generation succeeded; updating UI")
                     self.result = data
                     self.preview.setPlainText(json_pretty(data))
                     self.status.setText(t("generation_success") or "Generation succeeded")

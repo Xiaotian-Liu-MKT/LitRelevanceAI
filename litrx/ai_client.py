@@ -99,7 +99,18 @@ class AIClient:
             sanitized.pop("temperature", None)
 
         try:
-            logger.debug(f"Sending API request with {len(messages)} messages, kwargs={sanitized}")
+            # Promote visibility so GUI users can see activity at INFO level
+            try:
+                has_rf = bool(sanitized.get("response_format"))
+            except Exception:
+                has_rf = False
+            logger.info(
+                "Dispatching AI request | model=%s, messages=%d, temperature=%s, response_format=%s",
+                self.model,
+                len(messages),
+                sanitized.get("temperature", "<omitted>"),
+                sanitized.get("response_format") if has_rf else "<none>"
+            )
 
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -108,7 +119,7 @@ class AIClient:
                 **sanitized
             )
 
-            logger.debug(f"API request successful, usage: {getattr(response, 'usage', None)}")
+            logger.info("AI request completed | usage=%s", getattr(response, 'usage', None))
             return response.model_dump()
 
         except Exception as e:

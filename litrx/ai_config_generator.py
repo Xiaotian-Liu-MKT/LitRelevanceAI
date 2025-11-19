@@ -15,6 +15,10 @@ import yaml
 
 from .ai_client import AIClient
 from .resources import resource_path
+from .utils import AIResponseParser
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def _clean_code_fences(text: str, kind: str) -> str:
@@ -46,14 +50,24 @@ class AbstractModeGenerator:
         self.template = self._load_template(_PromptFiles.abstract_mode, self._default_mode_template())
 
     def generate_mode(self, description: str, language: str = "zh") -> Dict[str, Any]:
-        prompt = self.template.format(user_description=description, language=language)
-        req: Dict[str, Any] = {"messages": [{"role": "user", "content": prompt}]}
+        prompt = _safe_fill(self.template, user_description=description, language=language)
+        req: Dict[str, Any] = {
+            "messages": [{"role": "user", "content": prompt}],
+            # Force structured JSON output like abstract_screener
+            "response_format": {"type": "json_object"},
+        }
         if getattr(self.client, "supports_temperature", True):
             req["temperature"] = 0.3
+        logger.debug("AbstractModeGenerator: sending request with response_format json_object")
         resp = self.client.request(**req)
         content = resp["choices"][0]["message"]["content"]
+        logger.debug("AbstractModeGenerator: received content length=%d", len(content or ""))
         payload = _clean_code_fences(content, "json")
-        data = json.loads(payload)
+        try:
+            data = AIResponseParser.parse_json_with_fallback(payload)
+        except Exception as e:
+            logger.error("AbstractModeGenerator: failed to parse JSON: %s", e)
+            raise RuntimeError(f"解析AI返回失败: {e}\n片段: {str(payload)[:400]}")
         self._validate_mode(data)
         return data
 
@@ -96,14 +110,20 @@ class MatrixDimensionGenerator:
         self.template = self._load_template(_PromptFiles.matrix_dims, self._default_dims_template())
 
     def generate_dimensions(self, description: str, language: str = "zh") -> List[Dict[str, Any]]:
-        prompt = self.template.format(user_description=description, language=language)
+        prompt = _safe_fill(self.template, user_description=description, language=language)
         req: Dict[str, Any] = {"messages": [{"role": "user", "content": prompt}]}
         if getattr(self.client, "supports_temperature", True):
             req["temperature"] = 0.3
+        logger.debug("MatrixDimensionGenerator: sending request (YAML expected)")
         resp = self.client.request(**req)
         content = resp["choices"][0]["message"]["content"]
+        logger.debug("MatrixDimensionGenerator: received content length=%d", len(content or ""))
         payload = _clean_code_fences(content, "yaml")
-        data = yaml.safe_load(payload)
+        try:
+            data = yaml.safe_load(payload)
+        except Exception as e:
+            logger.error("MatrixDimensionGenerator: YAML parse error: %s", e)
+            raise RuntimeError(f"解析AI返回的YAML失败: {e}\n片段: {str(payload)[:400]}")
         dims = data.get("dimensions", data) if isinstance(data, dict) else data
         if not isinstance(dims, list):
             raise ValueError("Expected a list of dimensions")
@@ -143,3 +163,14 @@ class MatrixDimensionGenerator:
             "    # type-specific fields as needed\n"
         )
 
+
+def _safe_fill(template: str, **kwargs: Any) -> str:
+    """Safely replace known placeholders without interpreting other braces.
+
+    This avoids KeyError when external templates include JSON/YAML braces
+    that conflict with str.format.
+    """
+    out = template
+    for k, v in kwargs.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out

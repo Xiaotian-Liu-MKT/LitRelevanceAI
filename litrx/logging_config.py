@@ -25,6 +25,12 @@ def setup_logging(
     Returns:
         Configured logger instance
     """
+    # Allow environment to override log level
+    import os as _os
+    env_level = _os.getenv("LITRX_LOG_LEVEL")
+    if env_level:
+        log_level = env_level
+
     # Create log directory
     if log_dir is None:
         log_dir = Path.home() / ".litrx" / "logs"
