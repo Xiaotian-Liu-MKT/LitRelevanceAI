@@ -9,5 +9,20 @@
   },
   "pdf_screening": {
     "main_prompt": "请阅读所提供的文献并根据研究问题进行分析。请严格按照以下JSON格式以中文回答:\n{{{da_section}\n    \"screening_results\": {{\n{criteria_str}\n    }}\n}}"
+  },
+  "matrix_analysis": {
+    "dimension_prompts": {
+      "text": "\"{key}\": \"{question}\"",
+      "yes_no": "\"{key}\": \"{question} {answer_instruction}\"",
+      "single_choice": "\"{key}\": \"{question} {select_instruction} {options}\"",
+      "multiple_choice": "\"{key}\": \"{question} {multi_select_instruction} {options}\"",
+      "number": "\"{key}\": \"{question} {number_instruction}{unit_instruction}{na_instruction}\"",
+      "rating": "\"{key}\": \"{question} {rating_instruction}\"",
+      "list": "\"{key}\": \"{question} {list_instruction}\""
+    },
+    "main_prompt": "{instruction_header}\n\n{json_format_instruction}\n\n{{\n{dimensions_str}\n}}\n\n{important_notes}",
+    "instruction_header": "{read_instruction}",
+    "json_format_instruction": "{format_instruction}",
+    "important_notes": "{note1}\n{note2}\n{note3}\n{note4}\n{note5}"
   }
 }

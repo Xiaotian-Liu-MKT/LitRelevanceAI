@@ -206,6 +206,39 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 
         # File types
         "csv_files": "CSV 文件",
+
+        # Matrix Analysis Prompts
+        "matrix_answer_instruction": "请回答'是'、'否'或'不确定'",
+        "matrix_select_instruction": "请从以下选项中选择一个：",
+        "matrix_multi_select_instruction": "请从以下选项中选择所有适用的（多选），用分号分隔：",
+        "matrix_number_instruction": "请回答具体数值",
+        "matrix_unit_instruction": "（单位：{unit}）",
+        "matrix_na_instruction": "，如无法确定请回答'N/A'",
+        "matrix_rating_instruction": "请给出1-{scale}的评分（{scale_description}）",
+        "matrix_list_instruction": "请列出多个条目，用'{separator}'分隔",
+        "matrix_read_instruction": "请仔细阅读以下文献，并根据要求进行分析。",
+        "matrix_format_instruction": "请严格按照以下JSON格式回答所有问题（使用中文）：",
+        "matrix_note1": "1. 请确保输出是有效的JSON格式",
+        "matrix_note2": "2. 所有问题都必须回答，如果文中未提及或无法确定，请回答\"N/A\"或\"不确定\"",
+        "matrix_note3": "3. 对于选择题，请严格从给定选项中选择",
+        "matrix_note4": "4. 对于数值题，只回答数字或\"N/A\"",
+        "matrix_note5": "5. 保持回答简洁但完整",
+
+        # Matrix Tab UI
+        "matrix_config": "矩阵配置",
+        "current_dimensions": "当前维度数：{count}",
+        "edit_dimensions": "编辑维度",
+        "ai_generate_dims": "AI 生成维度",
+        "import_config": "导入配置",
+        "export_config": "导出配置",
+        "save_preset": "另存为 Preset",
+        "reset_default": "重置默认",
+        "data_input": "数据输入",
+        "pdf_folder_required": "PDF文件夹*",
+        "metadata_file_optional": "元数据文件（可选）",
+        "output_file_required": "输出文件*",
+        "stop": "停止",
+        "processing_log": "处理日志",
     },
     "en": {
         # Window titles
@@ -404,6 +437,39 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 
         # File types
         "csv_files": "CSV Files",
+
+        # Matrix Analysis Prompts
+        "matrix_answer_instruction": "Please answer 'Yes', 'No', or 'Uncertain'",
+        "matrix_select_instruction": "Please select one from the following options:",
+        "matrix_multi_select_instruction": "Please select all applicable options (multiple choice), separated by semicolons:",
+        "matrix_number_instruction": "Please provide a specific numerical value",
+        "matrix_unit_instruction": "(Unit: {unit})",
+        "matrix_na_instruction": ", if uncertain, answer 'N/A'",
+        "matrix_rating_instruction": "Please provide a rating from 1 to {scale} ({scale_description})",
+        "matrix_list_instruction": "Please list multiple items, separated by '{separator}'",
+        "matrix_read_instruction": "Please carefully read the following literature and analyze it as required.",
+        "matrix_format_instruction": "Please strictly answer all questions in the following JSON format:",
+        "matrix_note1": "1. Ensure the output is valid JSON format",
+        "matrix_note2": "2. All questions must be answered; if not mentioned or uncertain, answer \"N/A\" or \"Uncertain\"",
+        "matrix_note3": "3. For multiple choice, strictly select from the given options",
+        "matrix_note4": "4. For numerical values, only answer numbers or \"N/A\"",
+        "matrix_note5": "5. Keep answers concise but complete",
+
+        # Matrix Tab UI
+        "matrix_config": "Matrix Configuration",
+        "current_dimensions": "Current Dimensions: {count}",
+        "edit_dimensions": "Edit Dimensions",
+        "ai_generate_dims": "AI Generate Dimensions",
+        "import_config": "Import Config",
+        "export_config": "Export Config",
+        "save_preset": "Save as Preset",
+        "reset_default": "Reset Default",
+        "data_input": "Data Input",
+        "pdf_folder_required": "PDF Folder*",
+        "metadata_file_optional": "Metadata File (Optional)",
+        "output_file_required": "Output File*",
+        "stop": "Stop",
+        "processing_log": "Processing Log",
     }
 }
 

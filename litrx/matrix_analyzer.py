@@ -49,6 +49,7 @@ from .config import (
 from .ai_client import AIClient
 from .constants import TITLE_SIMILARITY_THRESHOLD, FUZZY_MATCH_MIN_SCORE
 from .exceptions import FileProcessingError
+from .i18n import t
 from .logging_config import get_logger
 from .utils import AIResponseParser
 from .resources import resource_path
@@ -93,6 +94,23 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load module configuration."""
     default_cfg = resource_path("configs", "config.yaml")
     return base_load_config(str(config_path or default_cfg), DEFAULT_CONFIG)
+
+
+def load_prompts() -> Dict[str, Any]:
+    """Load prompt templates from prompts_config.json.
+
+    Returns:
+        Dictionary containing matrix analysis prompt templates
+    """
+    prompts_path = resource_path("prompts_config.json")
+    try:
+        import json
+        with prompts_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("matrix_analysis", {})
+    except Exception as e:
+        logger.warning(f"Failed to load matrix prompts: {e}")
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -307,82 +325,144 @@ def build_pdf_metadata_mapping(
 # Prompt Construction
 # ---------------------------------------------------------------------------
 
-def construct_dimension_prompt(dimension: Dict[str, Any]) -> Tuple[str, str]:
-    """Construct prompt for a single dimension.
+def construct_dimension_prompt(dimension: Dict[str, Any], prompts: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+    """Construct prompt for a single dimension using templates and i18n.
+
+    Args:
+        dimension: Dimension configuration dictionary
+        prompts: Optional prompt templates (loaded from prompts_config.json)
 
     Returns:
         Tuple of (json_key, prompt_instruction)
     """
+    if prompts is None:
+        prompts = load_prompts()
+
     dim_type = dimension['type']
     key = dimension['key']
     question = dimension['question']
 
+    # Get template for this dimension type
+    templates = prompts.get('dimension_prompts', {})
+    template = templates.get(dim_type, '"{key}": "{question}"')
+
     if dim_type == 'text':
-        instruction = f'"{key}": "{question}"'
+        instruction = template.format(key=key, question=question)
 
     elif dim_type == 'yes_no':
-        instruction = f'"{key}": "{question} 请回答\'是\'、\'否\'或\'不确定\'"'
+        instruction = template.format(
+            key=key,
+            question=question,
+            answer_instruction=t('matrix_answer_instruction')
+        )
 
     elif dim_type == 'single_choice':
         options = dimension.get('options', [])
         options_str = '、'.join([f"'{opt}'" for opt in options])
-        instruction = f'"{key}": "{question} 请从以下选项中选择一个：{options_str}"'
+        instruction = template.format(
+            key=key,
+            question=question,
+            select_instruction=t('matrix_select_instruction'),
+            options=options_str
+        )
 
     elif dim_type == 'multiple_choice':
         options = dimension.get('options', [])
         options_str = '、'.join([f"'{opt}'" for opt in options])
-        instruction = f'"{key}": "{question} 请从以下选项中选择所有适用的（多选），用分号分隔：{options_str}"'
+        instruction = template.format(
+            key=key,
+            question=question,
+            multi_select_instruction=t('matrix_multi_select_instruction'),
+            options=options_str
+        )
 
     elif dim_type == 'number':
         unit = dimension.get('unit', '')
-        instruction = f'"{key}": "{question} 请回答具体数值{("（单位：" + unit + "）") if unit else ""}，如无法确定请回答\'N/A\'"'
+        unit_instruction = t('matrix_unit_instruction', unit=unit) if unit else ''
+        instruction = template.format(
+            key=key,
+            question=question,
+            number_instruction=t('matrix_number_instruction'),
+            unit_instruction=unit_instruction,
+            na_instruction=t('matrix_na_instruction')
+        )
 
     elif dim_type == 'rating':
         scale = dimension.get('scale', 5)
         scale_desc = dimension.get('scale_description', f'1-{scale}分')
-        instruction = f'"{key}": "{question} 请给出1-{scale}的评分（{scale_desc}）"'
+        instruction = template.format(
+            key=key,
+            question=question,
+            rating_instruction=t('matrix_rating_instruction', scale=scale, scale_description=scale_desc)
+        )
 
     elif dim_type == 'list':
         separator = dimension.get('separator', '; ')
-        instruction = f'"{key}": "{question} 请列出多个条目，用\'{separator.strip()}\'分隔"'
+        instruction = template.format(
+            key=key,
+            question=question,
+            list_instruction=t('matrix_list_instruction', separator=separator.strip())
+        )
 
     else:
-        instruction = f'"{key}": "{question}"'
+        # Fallback for unknown types
+        instruction = template.format(key=key, question=question)
 
     return key, instruction
 
 
 def construct_ai_prompt(
     dimensions: List[Dict[str, Any]],
+    prompts: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Construct the complete AI prompt from matrix configuration."""
+    """Construct the complete AI prompt from matrix configuration using templates and i18n.
+
+    Args:
+        dimensions: List of dimension configuration dictionaries
+        prompts: Optional prompt templates (loaded from prompts_config.json)
+
+    Returns:
+        Complete formatted prompt string
+    """
+    if prompts is None:
+        prompts = load_prompts()
 
     # Build dimension instructions
     dimension_prompts = []
     for dim in dimensions:
-        _, instruction = construct_dimension_prompt(dim)
+        _, instruction = construct_dimension_prompt(dim, prompts)
         dimension_prompts.append(f'    {instruction}')
 
     dimensions_str = ',\n'.join(dimension_prompts)
 
+    # Get main prompt template
+    main_template = prompts.get('main_prompt', '{instruction_header}\n\n{json_format_instruction}\n\n{{\n{dimensions_str}\n}}\n\n{important_notes}')
+
+    # Build prompt components using i18n
+    instruction_header = t('matrix_read_instruction')
+    json_format_instruction = t('matrix_format_instruction')
+    important_notes = '\n'.join([
+        t('matrix_note1'),
+        t('matrix_note2'),
+        t('matrix_note3'),
+        t('matrix_note4'),
+        t('matrix_note5')
+    ])
+
     # Construct full prompt
-    prompt_template = """请仔细阅读以下文献，并根据要求进行分析。
-
-请严格按照以下JSON格式回答所有问题（使用中文）：
-
-{{
-{dimensions_str}
-}}
-
-重要说明：
-1. 请确保输出是有效的JSON格式
-2. 所有问题都必须回答，如果文中未提及或无法确定，请回答"N/A"或"不确定"
-3. 对于选择题，请严格从给定选项中选择
-4. 对于数值题，只回答数字或"N/A"
-5. 保持回答简洁但完整
-"""
-
-    return prompt_template.format(dimensions_str=dimensions_str)
+    return main_template.format(
+        instruction_header=instruction_header,
+        json_format_instruction=json_format_instruction,
+        dimensions_str=dimensions_str,
+        important_notes=important_notes,
+        read_instruction=instruction_header,
+        format_instruction=json_format_instruction,
+        note1=t('matrix_note1'),
+        note2=t('matrix_note2'),
+        note3=t('matrix_note3'),
+        note4=t('matrix_note4'),
+        note5=t('matrix_note5')
+    )
 
 
 # ---------------------------------------------------------------------------
