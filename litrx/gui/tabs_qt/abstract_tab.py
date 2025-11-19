@@ -150,18 +150,81 @@ class AbstractScreeningWorker(QThread):
                 self.show_info.emit(t("hint"), t("task_stopped"))
                 return
 
+            # Verify that results were actually added to the dataframe
+            expected_result_cols = []
+            for q in open_q:
+                expected_result_cols.append(q['column_name'])
+                expected_result_cols.append(f"{q['column_name']}_verified")
+            for q in yes_no_q:
+                expected_result_cols.append(q['column_name'])
+                expected_result_cols.append(f"{q['column_name']}_verified")
+
+            missing_cols = [col for col in expected_result_cols if col not in df.columns]
+            if missing_cols:
+                error_msg = f"结果列缺失: {', '.join(missing_cols)}\n这可能是处理过程中出现了错误。"
+                self.show_error.emit(t("error"), error_msg)
+                self.append_log.emit(f"错误: 结果列缺失，无法保存")
+                return
+
+            # Check if columns have actual data (not all empty)
+            has_data = False
+            for col in expected_result_cols:
+                if col in df.columns:
+                    non_empty = df[col].notna() & (df[col] != '') & (df[col] != '信息缺失')
+                    if non_empty.any():
+                        has_data = True
+                        break
+
+            if not has_data:
+                self.append_log.emit(f"警告: 所有结果列都是空的，但仍将保存文件")
+
             # Auto-save results beside the input file using configured suffix
             try:
                 base, ext = os.path.splitext(self.file_path)
                 suffix = self.config.get("OUTPUT_FILE_SUFFIX", "_analyzed")
+
+                # Ensure suffix is not empty to avoid overwriting source file
+                if not suffix or suffix.strip() == "":
+                    suffix = "_analyzed"
+                    self.append_log.emit(f"警告: OUTPUT_FILE_SUFFIX 为空，使用默认值 '_analyzed'")
+
                 output_file_path = f"{base}{suffix}{ext}"
+
+                # Critical check: ensure we're not overwriting the source file
+                if os.path.abspath(output_file_path) == os.path.abspath(self.file_path):
+                    error_msg = (
+                        f"严重错误: 输出路径与输入路径相同!\n"
+                        f"输入: {self.file_path}\n"
+                        f"输出: {output_file_path}\n"
+                        f"这会覆盖源文件。请检查 OUTPUT_FILE_SUFFIX 配置。"
+                    )
+                    self.show_error.emit(t("error"), error_msg)
+                    self.append_log.emit(f"✗ 保存失败: 输出路径与输入路径相同")
+                    return
+
+                # Log before saving
+                self.append_log.emit(f"准备保存结果到: {output_file_path}")
+                self.append_log.emit(f"DataFrame大小: {len(df)} 行, {len(df.columns)} 列")
+                self.append_log.emit(f"结果列数量: {len([c for c in expected_result_cols if c in df.columns])}")
+
                 if ext.lower() == ".csv":
                     df.to_csv(output_file_path, index=False, encoding="utf-8-sig")
                 else:
                     df.to_excel(output_file_path, index=False)
-                self.show_info.emit(t("success"), t("complete_saved", path=output_file_path))
+
+                # Verify file was saved
+                import os
+                if os.path.exists(output_file_path):
+                    file_size = os.path.getsize(output_file_path)
+                    self.append_log.emit(f"✓ 文件已保存，大小: {file_size} bytes")
+                    self.show_info.emit(t("success"), t("complete_saved", path=output_file_path))
+                else:
+                    self.show_error.emit(t("error"), f"文件保存失败: {output_file_path} 不存在")
             except Exception as e:
-                self.show_error.emit(t("error"), str(e))
+                import traceback
+                error_msg = f"保存文件时出错:\n{str(e)}\n\n{traceback.format_exc()}"
+                self.show_error.emit(t("error"), error_msg)
+                self.append_log.emit(f"✗ 保存失败: {str(e)}")
 
             self.enable_export.emit()
 

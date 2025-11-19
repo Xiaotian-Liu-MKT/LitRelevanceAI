@@ -663,8 +663,20 @@ class AbstractScreener:
             open_questions: List of open-ended questions
             yes_no_questions: List of yes/no questions
         """
-        for col_name, value in results.get("columns", {}).items():
-            df.at[index, col_name] = value
+        columns_dict = results.get("columns", {})
+        if not columns_dict:
+            logger.warning(f"Article {index}: No columns in results, expected {len(open_questions) + len(yes_no_questions)} result columns")
+            return
+
+        applied_count = 0
+        for col_name, value in columns_dict.items():
+            try:
+                df.at[index, col_name] = value
+                applied_count += 1
+            except Exception as e:
+                logger.error(f"Failed to set df.at[{index}, '{col_name}'] = {value}: {e}")
+
+        logger.debug(f"Article {index}: Applied {applied_count}/{len(columns_dict)} result values to DataFrame")
 
     def analyze_batch_concurrent(
         self,
@@ -816,6 +828,27 @@ class AbstractScreener:
         logger.info(f"  In millions: Input={token_summary['input_M']:.3f}M, Output={token_summary['output_M']:.3f}M, Total={token_summary['total_M']:.3f}M")
         if token_summary['call_count'] > 0:
             logger.info(f"  Average tokens per call: {token_summary['avg_tokens_per_call']:.0f}")
+
+        # Verify results were applied to DataFrame
+        result_cols = []
+        for q in open_questions:
+            result_cols.append(q['column_name'])
+            result_cols.append(f"{q['column_name']}_verified")
+        for q in yes_no_questions:
+            result_cols.append(q['column_name'])
+            result_cols.append(f"{q['column_name']}_verified")
+
+        missing_cols = [col for col in result_cols if col not in df.columns]
+        if missing_cols:
+            logger.error(f"CRITICAL: Result columns missing from DataFrame: {missing_cols}")
+            logger.error(f"Available columns: {list(df.columns)}")
+        else:
+            # Count non-empty results
+            filled_count = 0
+            for col in result_cols:
+                non_empty = df[col].notna() & (df[col] != '') & (df[col] != '信息缺失')
+                filled_count += non_empty.sum()
+            logger.info(f"DataFrame verification: {len(result_cols)} result columns present, {filled_count} non-empty values")
 
         if stop_event and stop_event.is_set():
             raise KeyboardInterrupt("Analysis stopped by user")
