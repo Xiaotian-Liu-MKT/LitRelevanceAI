@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -81,52 +82,77 @@ class MatrixAnalysisWorker(QThread):
         self.metadata_file = metadata_file
         self.output_file = output_file
         self.matrix_config = matrix_config
-        self.stop_flag = False
+        self.stop_event = threading.Event()
 
     def stop(self) -> None:
         """Request the worker to stop processing."""
-        self.stop_flag = True
+        self.stop_event.set()
+        self.append_log.emit("Stopping analysis...")
 
     def run(self) -> None:
         """Run the matrix analysis (executed in background thread)."""
         try:
-            self.append_log.emit("Starting matrix analysis...")
+            self.append_log.emit("开始矩阵分析...")
 
-            # Process literature matrix
-            results_df = process_literature_matrix(
+            # Log optimization settings
+            max_workers = self.config.get('MAX_WORKERS', 4)
+            enable_cache = self.config.get('ENABLE_CACHE', True)
+            enable_checkpoints = self.config.get('ENABLE_PROGRESS_CHECKPOINTS', True)
+
+            self.append_log.emit(f"并发线程数: {max_workers}")
+            self.append_log.emit(f"结果缓存: {'启用' if enable_cache else '禁用'}")
+            self.append_log.emit(f"断点续传: {'启用' if enable_checkpoints else '禁用'}")
+
+            # Process literature matrix with new optimized function
+            results_df, mapping_df = process_literature_matrix(
                 pdf_folder=self.pdf_folder,
+                metadata_path=self.metadata_file,
                 matrix_config=self.matrix_config,
-                ai_config=self.config,
-                metadata_file=self.metadata_file,
-                progress_callback=self._progress_callback
+                app_config=self.config,
+                progress_callback=self._progress_callback,
+                status_callback=self._status_callback,
+                stop_event=self.stop_event
             )
 
-            if self.stop_flag:
-                self.show_info.emit("Info", "Analysis stopped by user")
+            if self.stop_event.is_set():
+                self.show_info.emit(t("info"), "分析已被用户停止")
                 return
 
-            # Save results
-            save_results(results_df, self.output_file)
+            # Prepare output configuration
+            output_config = {
+                'file_suffix': self.config.get('OUTPUT_FILE_SUFFIX', '_literature_matrix'),
+                'file_type': self.config.get('OUTPUT_FILE_TYPE', 'xlsx')
+            }
 
-            self.append_log.emit(f"Results saved to: {self.output_file}")
-            self.show_info.emit("Success", "Matrix analysis completed successfully!")
+            # Save results
+            output_path = save_results(
+                results_df,
+                mapping_df,
+                self.pdf_folder,
+                output_config
+            )
+
+            self.append_log.emit(f"结果已保存到: {output_path}")
+            self.show_info.emit(t("success"), "矩阵分析成功完成！")
+
+        except KeyboardInterrupt:
+            self.show_info.emit(t("info"), "分析已被用户停止")
 
         except Exception as e:
-            self.show_error.emit("Error", f"Analysis failed: {e}")
+            logger.error(f"Matrix analysis failed: {e}", exc_info=True)
+            self.show_error.emit(t("error"), f"分析失败: {e}")
 
         finally:
             self.finished_processing.emit()
 
-    def _progress_callback(self, current: int, total: int, message: str = "") -> None:
+    def _progress_callback(self, current: int, total: int) -> None:
         """Progress callback for matrix analysis (called from worker thread)."""
-        if self.stop_flag:
-            raise Exception("Analysis stopped by user")
-
         progress = (current / total * 100) if total > 0 else 0
         self.update_progress.emit(progress)
 
-        if message:
-            self.append_log.emit(f"[{current}/{total}] {message}")
+    def _status_callback(self, pdf_name: str, status: str) -> None:
+        """Status callback for individual PDF processing."""
+        self.append_log.emit(f"[{pdf_name}] {status}")
 
 
 class MatrixTab(QWidget):
