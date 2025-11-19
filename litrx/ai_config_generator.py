@@ -50,7 +50,11 @@ class AbstractModeGenerator:
         self.template = self._load_template(_PromptFiles.abstract_mode, self._default_mode_template())
 
     def generate_mode(self, description: str, language: str = "zh") -> Dict[str, Any]:
+        logger.info("generate_mode called with description length=%d, language=%s", len(description), language)
+
         prompt = _safe_fill(self.template, user_description=description, language=language)
+        logger.debug("Prompt template filled, total length=%d", len(prompt))
+
         req: Dict[str, Any] = {
             "messages": [{"role": "user", "content": prompt}],
             # Force structured JSON output like abstract_screener
@@ -58,17 +62,70 @@ class AbstractModeGenerator:
         }
         if getattr(self.client, "supports_temperature", True):
             req["temperature"] = 0.3
-        logger.debug("AbstractModeGenerator: sending request with response_format json_object")
+
+        logger.info("Sending AI request with response_format=json_object")
         resp = self.client.request(**req)
-        content = resp["choices"][0]["message"]["content"]
-        logger.debug("AbstractModeGenerator: received content length=%d", len(content or ""))
+
+        logger.info("AI request returned, response type=%s", type(resp).__name__)
+
+        # Validate response structure
+        if not isinstance(resp, dict):
+            raise TypeError(f"Expected dict from AI client, got {type(resp).__name__}")
+        if "choices" not in resp:
+            raise KeyError(f"Response missing 'choices' key. Keys: {list(resp.keys())}")
+        if not resp["choices"]:
+            raise ValueError("Response 'choices' list is empty")
+
+        # Extract content with detailed logging
+        choice = resp["choices"][0]
+        logger.debug("First choice type=%s, keys=%s", type(choice).__name__, list(choice.keys()) if isinstance(choice, dict) else "N/A")
+
+        if not isinstance(choice, dict) or "message" not in choice:
+            raise KeyError(f"Choice missing 'message' key. Choice: {choice}")
+
+        message = choice["message"]
+        logger.debug("Message type=%s, keys=%s", type(message).__name__, list(message.keys()) if isinstance(message, dict) else "N/A")
+
+        if not isinstance(message, dict) or "content" not in message:
+            raise KeyError(f"Message missing 'content' key. Message: {message}")
+
+        content = message["content"]
+        logger.info("Extracted content, type=%s, length=%d", type(content).__name__, len(content) if isinstance(content, str) else -1)
+
+        # Ensure content is a string
+        if not isinstance(content, str):
+            raise TypeError(f"Expected string content, got {type(content).__name__}")
+
+        if not content:
+            raise ValueError("AI returned empty content")
+
+        logger.debug("Content preview (first 200 chars): %s", content[:200])
+
+        # Clean code fences
+        logger.debug("Cleaning code fences")
         payload = _clean_code_fences(content, "json")
+        logger.debug("After cleaning, payload length=%d", len(payload))
+
+        # Parse JSON with fallback
+        logger.info("Parsing JSON response")
         try:
             data = AIResponseParser.parse_json_with_fallback(payload)
+            logger.info("JSON parsed successfully, result type=%s, keys=%s", type(data).__name__, list(data.keys()) if isinstance(data, dict) else "N/A")
         except Exception as e:
-            logger.error("AbstractModeGenerator: failed to parse JSON: %s", e)
+            logger.error("Failed to parse JSON: %s", e, exc_info=True)
+            logger.error("Payload preview (first 500 chars): %s", payload[:500])
             raise RuntimeError(f"解析AI返回失败: {e}\n片段: {str(payload)[:400]}")
-        self._validate_mode(data)
+
+        # Validate structure
+        logger.info("Validating mode structure")
+        try:
+            self._validate_mode(data)
+            logger.info("Mode validation passed")
+        except Exception as e:
+            logger.error("Mode validation failed: %s", e, exc_info=True)
+            raise
+
+        logger.info("generate_mode completed successfully")
         return data
 
     def _validate_mode(self, data: Dict[str, Any]) -> None:
