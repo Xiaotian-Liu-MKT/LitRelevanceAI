@@ -46,7 +46,16 @@ class AbstractModeGenerator:
     """Generate abstract-screening mode configs via LLM."""
 
     def __init__(self, config: Dict[str, Any]):
-        self.client = AIClient(config)
+        # Use AI_ASSISTANT_MODEL if set, otherwise use MODEL_NAME
+        assistant_config = config.copy()
+        assistant_model = config.get("AI_ASSISTANT_MODEL")
+        if assistant_model:
+            assistant_config["MODEL_NAME"] = assistant_model
+            logger.info("Using AI assistant model: %s", assistant_model)
+        else:
+            logger.info("Using main model for AI assistant: %s", config.get("MODEL_NAME"))
+
+        self.client = AIClient(assistant_config)
         self.template = self._load_template(_PromptFiles.abstract_mode, self._default_mode_template())
 
     def generate_mode(self, description: str, language: str = "zh") -> Dict[str, Any]:
@@ -200,7 +209,16 @@ class MatrixDimensionGenerator:
     """Generate matrix dimension configs via LLM."""
 
     def __init__(self, config: Dict[str, Any]):
-        self.client = AIClient(config)
+        # Use AI_ASSISTANT_MODEL if set, otherwise use MODEL_NAME
+        assistant_config = config.copy()
+        assistant_model = config.get("AI_ASSISTANT_MODEL")
+        if assistant_model:
+            assistant_config["MODEL_NAME"] = assistant_model
+            logger.info("Using AI assistant model: %s", assistant_model)
+        else:
+            logger.info("Using main model for AI assistant: %s", config.get("MODEL_NAME"))
+
+        self.client = AIClient(assistant_config)
         self.template = self._load_template(_PromptFiles.matrix_dims, self._default_dims_template())
 
     def generate_dimensions(self, description: str, language: str = "zh") -> List[Dict[str, Any]]:

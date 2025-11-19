@@ -171,7 +171,7 @@ class BaseWindow(QMainWindow):
 
         config_layout.addLayout(row1)
 
-        # Row 2: Model, Language and Buttons
+        # Row 2: Model, AI Assistant Model, Language and Buttons
         row2 = QHBoxLayout()
         self.model_label = QLabel(t("model"))
         self.model_label.setMinimumWidth(100)
@@ -179,8 +179,19 @@ class BaseWindow(QMainWindow):
 
         self.model_entry = QLineEdit()
         self.model_entry.setText(self.base_config.get("MODEL_NAME", ""))
-        self.model_entry.setMaximumWidth(200)
+        self.model_entry.setMaximumWidth(150)
         row2.addWidget(self.model_entry)
+
+        row2.addSpacing(10)
+
+        self.ai_assistant_model_label = QLabel(t("ai_assistant_model"))
+        row2.addWidget(self.ai_assistant_model_label)
+
+        self.ai_assistant_model_entry = QLineEdit()
+        self.ai_assistant_model_entry.setText(self.base_config.get("AI_ASSISTANT_MODEL", ""))
+        self.ai_assistant_model_entry.setPlaceholderText(t("ai_assistant_model_hint"))
+        self.ai_assistant_model_entry.setMaximumWidth(150)
+        row2.addWidget(self.ai_assistant_model_entry)
 
         row2.addSpacing(10)
 
@@ -312,6 +323,9 @@ class BaseWindow(QMainWindow):
         model = self.model_entry.text().strip()
         if model:
             config["MODEL_NAME"] = model
+        # Add AI assistant model configuration
+        ai_assistant_model = self.ai_assistant_model_entry.text().strip()
+        config["AI_ASSISTANT_MODEL"] = ai_assistant_model
         config["LANGUAGE"] = self.i18n.current_language
         self.base_config.update(config)
         return config
@@ -350,7 +364,7 @@ class BaseWindow(QMainWindow):
         # Save non-sensitive config to YAML
         data = {
             key: config.get(key, "")
-            for key in ["AI_SERVICE", "MODEL_NAME", "API_BASE", "LANGUAGE"]
+            for key in ["AI_SERVICE", "MODEL_NAME", "AI_ASSISTANT_MODEL", "API_BASE", "LANGUAGE"]
         }
 
         # Migrate old plaintext keys to keyring
@@ -510,6 +524,8 @@ class BaseWindow(QMainWindow):
         self.service_label.setText(t("ai_service"))
         self.api_key_label.setText(t("api_key"))
         self.model_label.setText(t("model"))
+        self.ai_assistant_model_label.setText(t("ai_assistant_model"))
+        self.ai_assistant_model_entry.setPlaceholderText(t("ai_assistant_model_hint"))
         self.language_label.setText(t("language"))
         self.save_button.setText(t("save_config"))
         self.prompt_button.setText(t("prompt_settings"))
