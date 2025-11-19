@@ -53,6 +53,7 @@ from .i18n import t
 from .logging_config import get_logger
 from .utils import AIResponseParser
 from .resources import resource_path
+from .token_tracker import TokenUsageTracker
 
 
 load_env_file()
@@ -127,6 +128,7 @@ def get_ai_response(
     pdf_path: str,
     prompt: str,
     client: AIClient,
+    token_tracker: Optional[TokenUsageTracker] = None,
 ) -> str:
     """Convert a PDF to text, send with the prompt and return raw model text."""
     pdf_text = extract_pdf_text(pdf_path)
@@ -139,6 +141,11 @@ def get_ai_response(
     ]
 
     response = client.request(messages)
+
+    # Track token usage
+    if token_tracker and 'token_usage' in response:
+        token_tracker.add_usage(response['token_usage'])
+
     try:
         return response["choices"][0]["message"]["content"]
     except Exception:
@@ -531,8 +538,9 @@ def process_literature_matrix(
         - results_df: Final combined results
         - mapping_df: PDF to metadata mapping (if metadata provided)
     """
-    # Initialize AI client
+    # Initialize AI client and token tracker
     client = AIClient(app_config)
+    token_tracker = TokenUsageTracker()
 
     # Get PDF files
     pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith('.pdf')]
@@ -573,7 +581,7 @@ def process_literature_matrix(
 
         try:
             # Get AI analysis
-            raw_response = get_ai_response(full_path, base_prompt, client)
+            raw_response = get_ai_response(full_path, base_prompt, client, token_tracker)
             parsed = parse_ai_response(raw_response, dimensions)
 
             # Build result row
@@ -615,6 +623,16 @@ def process_literature_matrix(
         time.sleep(app_config.get('API_REQUEST_DELAY', 1))
 
     results_df = pd.DataFrame(results)
+
+    # Log token usage statistics
+    token_summary = token_tracker.get_summary()
+    logger.info(f"\nToken usage statistics:")
+    logger.info(f"  API calls: {token_summary['call_count']}")
+    logger.info(f"  {token_summary['summary_text']}")
+    logger.info(f"  In millions: Input={token_summary['input_M']:.3f}M, Output={token_summary['output_M']:.3f}M, Total={token_summary['total_M']:.3f}M")
+    if token_summary['call_count'] > 0:
+        logger.info(f"  Average tokens per call: {token_summary['avg_tokens_per_call']:.0f}")
+
     return results_df, mapping_df
 
 

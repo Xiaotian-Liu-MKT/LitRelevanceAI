@@ -13,6 +13,7 @@ from .resources import resource_path
 from .i18n import t
 from .logging_config import get_logger
 from .security_utils import SecureLogger, safe_log_config, safe_log_error
+from .token_tracker import TokenUsage
 
 logger = get_logger(__name__)
 
@@ -91,7 +92,8 @@ class AIClient:
         Returns
         -------
         dict:
-            Response dictionary in OpenAI format with 'choices' key.
+            Response dictionary in OpenAI format with 'choices' and 'token_usage' keys.
+            The 'token_usage' key contains a TokenUsage object with input/output token counts.
         """
         # Sanitize unsupported params for some models (e.g., GPT-5/o* may not accept temperature)
         sanitized = dict(kwargs)
@@ -127,8 +129,19 @@ class AIClient:
                 **sanitized
             )
 
-            logger.info("AI request completed | usage=%s", getattr(response, 'usage', None))
-            return response.model_dump()
+            # Parse token usage from response
+            usage_dict = getattr(response, 'usage', None)
+            token_usage = TokenUsage.from_api_response(usage_dict.model_dump() if usage_dict else None)
+
+            logger.info(
+                "AI request completed | %s | API calls: see tracker",
+                token_usage.format_summary()
+            )
+
+            # Return response dict with token_usage object attached
+            result = response.model_dump()
+            result['token_usage'] = token_usage
+            return result
 
         except Exception as e:
             # Fallback retry if server rejects temperature specifically
@@ -148,7 +161,15 @@ class AIClient:
                         timeout=self.config.get("AI_TIMEOUT_SECONDS", 60),
                         **retry_kwargs
                     )
-                    return response.model_dump()
+
+                    # Parse token usage for retry response
+                    usage_dict = getattr(response, 'usage', None)
+                    token_usage = TokenUsage.from_api_response(usage_dict.model_dump() if usage_dict else None)
+                    logger.info("Retry request completed | %s", token_usage.format_summary())
+
+                    result = response.model_dump()
+                    result['token_usage'] = token_usage
+                    return result
                 except Exception as e2:
                     # Sanitize error message to prevent API key leakage
                     safe_error = safe_log_error(e2)
