@@ -47,6 +47,10 @@ class AIConfig(BaseModel):
         default="gpt-4o",
         description="Model identifier"
     )
+    AI_ASSISTANT_MODEL: Optional[str] = Field(
+        default=None,
+        description="Model for AI assistants (config generation). If not set, uses MODEL_NAME"
+    )
     OPENAI_API_KEY: Optional[str] = Field(
         default=None,
         description="OpenAI API key"
@@ -241,6 +245,7 @@ class ConfigLoader:
         return {
             "AI_SERVICE": "openai",
             "MODEL_NAME": "gpt-4o",
+            "AI_ASSISTANT_MODEL": None,
             "OPENAI_API_KEY": None,
             "GEMINI_API_KEY": None,
             "SILICONFLOW_API_KEY": None,
@@ -289,7 +294,7 @@ class ConfigLoader:
         config = {}
 
         env_keys = [
-            'AI_SERVICE', 'MODEL_NAME', 'OPENAI_API_KEY', 'GEMINI_API_KEY',
+            'AI_SERVICE', 'MODEL_NAME', 'AI_ASSISTANT_MODEL', 'OPENAI_API_KEY', 'GEMINI_API_KEY',
             'SILICONFLOW_API_KEY', 'API_BASE', 'TEMPERATURE', 'VERBOSITY',
             'REASONING_EFFORT', 'ENABLE_CACHE', 'ENABLE_VERIFICATION', 'LANGUAGE'
         ]
@@ -341,6 +346,7 @@ _config_loader = ConfigLoader()
 DEFAULT_CONFIG: Dict[str, Any] = {
     "AI_SERVICE": "openai",
     "MODEL_NAME": "gpt-4o",
+    "AI_ASSISTANT_MODEL": "",
     "OPENAI_API_KEY": "",
     "GEMINI_API_KEY": "",
     "SILICONFLOW_API_KEY": "",

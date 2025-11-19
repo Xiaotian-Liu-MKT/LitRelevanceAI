@@ -21,6 +21,7 @@ litrx/pdf_screener.py
 litrx/progress_manager.py
 litrx/prompt_builder.py
 litrx/resources.py
+litrx/security_utils.py
 litrx/task_manager.py
 litrx/utils.py
 litrx.egg-info/PKG-INFO
@@ -37,5 +38,8 @@ litrx/gui/tabs_qt/abstract_tab.py
 litrx/gui/tabs_qt/csv_tab.py
 litrx/gui/tabs_qt/matrix_tab.py
 tests/test_abstract_verification.py
+tests/test_ai_assistants.py
+tests/test_exceptions.py
 tests/test_prompt_builder.py
 tests/test_prompt_integration.py
+tests/test_security_logging.py
