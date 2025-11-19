@@ -36,6 +36,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # Buttons
         "browse": "浏览",
         "start_analysis": "开始分析",
+        "generate_config": "🧠 生成配置",
+        "generate_dimensions": "🧠 生成维度",
+        "apply_changes": "✅ 应用",
+        "apply_selected": "✅ 应用选中",
+        "overwrite": "⚠️ 覆盖",
+        "rename": "✏️ 重命名",
         "save": "保存",
         "cancel": "取消",
         "reset_defaults": "恢复默认",
@@ -50,6 +56,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "warning": "警告",
         "confirm": "确认",
         "saved": "已保存",
+        "saved_with_backup": "已保存（备份: {path}）",
 
         # Prompt settings
         "prompt_settings_title": "Prompt设置",
@@ -98,6 +105,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "edit_questions": "编辑问题",
         "add_mode": "添加模式",
         "log_label": "日志:",
+        "preview_label": "预览:",
+        "please_enter_description": "请先输入需求描述",
+        "generating": "正在生成...",
+        "generation_success": "生成成功",
+        "generation_failed": "生成失败",
+        "ai_mode_assistant_title": "AI 助手（创建模式）",
+        "ai_mode_guide": "请用自然语言描述您的筛选需求：研究领域、需要判断的要点（是/否）、需要提取的信息（开放题）。",
+        "ai_matrix_assistant_title": "AI 助手（生成维度）",
+        "ai_dimension_guide": "请描述需要在矩阵中提取的信息：题型、候选选项、评分尺度等。",
+        "choose_action": "发现重名模式，请选择处理方式：",
+        "conflict_mode_key": "模式键名已存在：{key}",
+        "conflict_preset_name": "Preset 名称已存在：{name}",
 
         # CSV Tab specific
         "research_topic_label": "研究主题:",
@@ -210,6 +229,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # Buttons
         "browse": "Browse",
         "start_analysis": "Start Analysis",
+        "generate_config": "🧠 Generate Config",
+        "generate_dimensions": "🧠 Generate Dimensions",
+        "apply_changes": "✅ Apply",
+        "apply_selected": "✅ Apply Selected",
+        "overwrite": "⚠️ Overwrite",
+        "rename": "✏️ Rename",
         "save": "Save",
         "cancel": "Cancel",
         "reset_defaults": "Reset to Defaults",
@@ -224,6 +249,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "warning": "Warning",
         "confirm": "Confirm",
         "saved": "Saved",
+        "saved_with_backup": "Saved with backup at {path}",
 
         # Prompt settings
         "prompt_settings_title": "Prompt Settings",
@@ -328,6 +354,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "edit_questions": "Edit Questions",
         "add_mode": "Add Mode",
         "log_label": "Log:",
+        "preview_label": "Preview:",
+        "please_enter_description": "Please enter a description first",
+        "generating": "Generating...",
+        "generation_success": "Generation succeeded",
+        "generation_failed": "Generation failed",
+        "ai_mode_assistant_title": "AI Assistant (Create Mode)",
+        "ai_mode_guide": "Describe your screening needs: domain, binary checks (yes/no), and extracted info (open questions).",
+        "ai_matrix_assistant_title": "AI Assistant (Generate Dimensions)",
+        "ai_dimension_guide": "Describe the dimensions to extract: types, candidate options, rating scales, etc.",
+        "choose_action": "Found duplicate mode key. Choose an action:",
+        "conflict_mode_key": "Mode key already exists: {key}",
+        "conflict_preset_name": "Preset name already exists: {name}",
 
         # CSV Tab specific
         "research_topic_label": "Research Topic:",

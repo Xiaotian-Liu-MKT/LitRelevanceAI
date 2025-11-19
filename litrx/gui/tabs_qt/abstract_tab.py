@@ -43,6 +43,7 @@ from ...abstract_screener import (
 )
 from ...i18n import get_i18n, t
 from ...resources import resource_path
+from ..dialogs_qt.ai_mode_assistant_qt import AIModeAssistantDialog
 
 if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
@@ -111,6 +112,10 @@ class AbstractTab(QWidget):
         self.edit_questions_btn = QPushButton(t("edit_questions"))
         self.edit_questions_btn.clicked.connect(self.edit_questions)
         mode_layout.addWidget(self.edit_questions_btn)
+
+        self.ai_assist_btn = QPushButton(t("ai_mode_assistant_title") or "AI Assistant")
+        self.ai_assist_btn.clicked.connect(self.open_ai_mode_assistant)
+        mode_layout.addWidget(self.ai_assist_btn)
 
         left_layout.addLayout(mode_layout)
 
@@ -226,6 +231,7 @@ class AbstractTab(QWidget):
         self.mode_label.setText(t("screening_mode_label"))
         self.add_mode_btn.setText(t("add_mode"))
         self.edit_questions_btn.setText(t("edit_questions"))
+        self.ai_assist_btn.setText(t("ai_mode_assistant_title") or "AI Assistant")
         self.verify_checkbox.setText(t("enable_verification"))
         self.workers_label.setText(t("concurrent_workers"))
         self.start_btn.setText(t("start_screening"))
@@ -404,6 +410,35 @@ class AbstractTab(QWidget):
     # ------------------------------------------------------------------
     def _questions_path(self) -> Path:
         return resource_path("questions_config.json")
+
+    def _resolve_questions_config_write_path(self) -> Path:
+        """Resolve a writable path for questions_config.json (handles frozen apps)."""
+        import os
+        # Prefer resource path if writable
+        p = self._questions_path()
+        try:
+            os.makedirs(os.path.dirname(str(p)), exist_ok=True)
+            with open(p, 'a', encoding='utf-8'):
+                pass
+            return p
+        except Exception:
+            user_dir = os.path.join(os.path.expanduser('~'), '.litrx')
+            os.makedirs(user_dir, exist_ok=True)
+            return Path(user_dir) / 'questions_config.json'
+
+    def _write_questions_config(self, data: dict, backup: bool = False) -> None:
+        # Try writing to packaged location; if fails, write to ~/.litrx/questions_config.json
+        import os, json, time
+        target = self._resolve_questions_config_write_path()
+        if backup and os.path.exists(target):
+            bak = str(target) + f".bak.{int(time.time())}"
+            try:
+                with open(target, 'r', encoding='utf-8') as src, open(bak, 'w', encoding='utf-8') as dst:
+                    dst.write(src.read())
+            except Exception:
+                pass
+        with open(target, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def add_mode(self) -> None:
         """Add a new screening mode and persist to questions_config.json."""
@@ -643,6 +678,65 @@ class AbstractTab(QWidget):
 
         dialog.resize(760, 480)
         dialog.exec()
+
+    def open_ai_mode_assistant(self) -> None:
+        """Launch AI assistant to generate a new screening mode and save it."""
+        dlg = AIModeAssistantDialog(self, self.app.build_config())
+        if dlg.exec() == dlg.Accepted and dlg.result:
+            try:
+                # Load existing config
+                import json
+                q_path = self._questions_path()
+                try:
+                    with open(q_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+
+                mode = dlg.result
+                key = mode.get('mode_key', 'new_mode')
+                if key in data:
+                    # Custom dialog with localized buttons
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Icon.Warning)
+                    box.setWindowTitle(t("conflict_mode_key", key=key) or f"Key exists: {key}")
+                    box.setText(t("choose_action") or "Choose action")
+                    overwrite_btn = box.addButton(t("overwrite") or "Overwrite", QMessageBox.ButtonRole.AcceptRole)
+                    rename_btn = box.addButton(t("rename") or "Rename", QMessageBox.ButtonRole.ActionRole)
+                    cancel_btn = box.addButton(t("cancel") or "Cancel", QMessageBox.ButtonRole.RejectRole)
+                    box.exec()
+                    clicked = box.clickedButton()
+                    if clicked == cancel_btn:
+                        return
+                    elif clicked == rename_btn:
+                        suffix = 1
+                        while f"{key}_{suffix}" in data:
+                            suffix += 1
+                        key = f"{key}_{suffix}"
+                        mode['mode_key'] = key
+                        do_backup = False
+                    else:
+                        # overwrite with backup
+                        do_backup = True
+                else:
+                    do_backup = False
+
+                data[key] = {
+                    'description': mode.get('description', ''),
+                    'yes_no_questions': mode.get('yes_no_questions', []),
+                    'open_questions': mode.get('open_questions', []),
+                }
+                self._write_questions_config(data, backup=do_backup)
+
+                # refresh combo
+                self._load_modes()
+                self.mode_combo.clear(); self.mode_combo.addItems(self.mode_options)
+                idx = self.mode_combo.findText(key)
+                if idx >= 0:
+                    self.mode_combo.setCurrentIndex(idx)
+                QMessageBox.information(self, t("success") or "Success", t("saved") or "Saved")
+            except Exception as e:
+                QMessageBox.critical(self, t("error") or "Error", str(e))
 
     def show_statistics(self) -> None:
         """Show statistics summary for current results and mode."""

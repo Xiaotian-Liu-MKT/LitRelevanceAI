@@ -17,12 +17,14 @@ a = Analysis(
             ('configs', 'configs'),
             ('questions_config.json', '.'),
             ('prompts_config.json', '.'),
+            ('litrx/prompts', 'litrx/prompts'),
         ],
     hiddenimports=pyqt6[2] + [
         'openai',
         'keyring.backends.Windows',
         'keyring.backends.macOS',
         'keyring.backends.SecretService',
+        'yaml',
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -56,4 +58,3 @@ coll = COLLECT(
     upx_exclude=[],
     name='LitRelevanceAI'
 )
-

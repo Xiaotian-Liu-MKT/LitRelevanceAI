@@ -1,5 +1,4 @@
-You are an expert in systematic literature review and data extraction methodology.
-Your task is to help researchers design literature matrix dimensions for extracting structured information from academic papers.
+You are an expert in systematic literature review and data extraction.
 
 The user wants to extract the following information from literature:
 
@@ -7,153 +6,24 @@ The user wants to extract the following information from literature:
 {user_description}
 """
 
-Please generate dimension configurations in YAML format with this structure:
+Please generate dimension configurations in YAML with this structure:
 
 dimensions:
-  - type: <question_type>
-    key: key_in_english
+  - type: <text|yes_no|single_choice|multiple_choice|number|rating|list>
+    key: english_snake_case
     question: "Question text in {language}"
     column_name: "Column name in {language}"
-    # Type-specific fields as needed
-
-Available question types and when to use them:
-
-1. **text**: Open-ended text extraction for detailed descriptions
-   - Use for: main findings, theoretical frameworks, research context, limitations
-   - Example: "What are the main research findings? Summarize in 3-5 sentences."
-
-2. **yes_no**: Binary judgment questions (yes/no/uncertain)
-   - Use for: quick characteristic identification
-   - Example: "Is this empirical research?", "Does it include Chinese samples?"
-
-3. **single_choice**: Choose exactly one option from a predefined list
-   - Use for: mutually exclusive categories
-   - Example: "Research type: empirical/theoretical/review/conceptual"
-   - Required field: options (list of 2+ strings)
-
-4. **multiple_choice**: Choose multiple options from a predefined list
-   - Use for: non-exclusive characteristics that can co-occur
-   - Example: "Data collection methods: survey/interview/experiment/observation"
-   - Required field: options (list of 2+ strings)
-
-5. **number**: Extract numerical values
-   - Use for: sample size, effect size, publication year, page count
-   - Optional field: unit (e.g., "个", "%", "年")
-
-6. **rating**: Subjective rating on a scale
-   - Use for: quality assessment, relevance scoring, innovation evaluation
-   - Required field: scale (integer 2-10, typically 5)
-   - Optional field: scale_description (e.g., "1=poor, 5=excellent")
-
-7. **list**: Extract multiple items as a list
-   - Use for: key variables, theories used, authors, keywords
-   - Required field: separator (e.g., "; " or ", ")
-
-Type-specific field requirements:
-- single_choice/multiple_choice: MUST have "options" (list of 2+ strings)
-- number: MAY have "unit" (string)
-- rating: MUST have "scale" (int 2-10), MAY have "scale_description" (string)
-- list: MUST have "separator" (string)
+    # Type-specific fields as needed:
+    # single_choice/multiple_choice: options (list of strings, >=2)
+    # number: unit (optional)
+    # rating: scale (int 2-10), scale_description (optional)
+    # list: separator
 
 Guidelines:
-1. Choose the MOST APPROPRIATE type for each piece of information
-2. For choice types, provide comprehensive but focused option lists (typically 4-8 options)
-3. Make questions clear, specific, and answerable from abstracts or full texts
-4. Generate keys in English snake_case (e.g., "research_paradigm", "sample_size")
-5. Generate questions and column names in {language}
-6. Aim for 5-12 dimensions total for usability
-7. Group related dimensions together
-8. Ensure questions are unambiguous and have clear answering criteria
-9. Output ONLY the YAML, no markdown code blocks, no explanations
+- Choose the most appropriate type for each info piece
+- Provide options for choice types
+- 5-12 dimensions total
+- Keys must be English snake_case
+- Questions/columns must be in {language}
+- Output ONLY YAML. No markdown fences, no explanations
 
-Example for reference:
-
-Input (Chinese):
-"我需要提取每篇文献的研究方法（定量/定性/混合），样本量，是否在中国开展，使用的主要理论（可能有多个），以及我对研究质量的评分（1-5分）。"
-
-Output:
-dimensions:
-  - type: single_choice
-    key: research_paradigm
-    question: "研究采用的研究范式是什么？"
-    column_name: "研究范式"
-    options:
-      - "定量研究"
-      - "定性研究"
-      - "混合方法"
-      - "不适用"
-
-  - type: number
-    key: sample_size
-    question: "研究的样本量是多少？如无法确定，回答N/A。"
-    column_name: "样本量"
-    unit: "个"
-
-  - type: yes_no
-    key: chinese_context
-    question: "是否在中国情境下开展研究？"
-    column_name: "中国情境"
-
-  - type: list
-    key: theoretical_frameworks
-    question: "研究使用了哪些主要理论框架？请列出。"
-    column_name: "理论框架"
-    separator: "; "
-
-  - type: rating
-    key: research_quality
-    question: "请评估本研究的整体质量（考虑研究设计、方法严谨性、结果可信度）"
-    column_name: "研究质量"
-    scale: 5
-    scale_description: "1=很差, 2=较差, 3=一般, 4=良好, 5=优秀"
-
-Input (English):
-"I need to extract the research type, data collection methods (can be multiple), publication year, number of hypotheses tested, and my assessment of methodological rigor."
-
-Output:
-dimensions:
-  - type: single_choice
-    key: research_type
-    question: "What type of research is this?"
-    column_name: "Research Type"
-    options:
-      - "Empirical study"
-      - "Theoretical paper"
-      - "Literature review"
-      - "Meta-analysis"
-      - "Conceptual paper"
-      - "Methodological paper"
-
-  - type: multiple_choice
-    key: data_collection_methods
-    question: "What data collection methods were used? (Select all that apply)"
-    column_name: "Data Collection Methods"
-    options:
-      - "Survey/Questionnaire"
-      - "Interview"
-      - "Focus group"
-      - "Experiment"
-      - "Observation"
-      - "Archival data"
-      - "Secondary data"
-
-  - type: number
-    key: publication_year
-    question: "What is the publication year?"
-    column_name: "Year"
-    unit: "year"
-
-  - type: number
-    key: num_hypotheses
-    question: "How many hypotheses were tested? Answer N/A if not applicable."
-    column_name: "Number of Hypotheses"
-    unit: "hypotheses"
-
-  - type: rating
-    key: methodological_rigor
-    question: "Assess the methodological rigor of this study"
-    column_name: "Methodological Rigor"
-    scale: 5
-    scale_description: "1=weak, 2=fair, 3=moderate, 4=strong, 5=excellent"
-
-Now generate the dimension configurations for the user's requirements above.

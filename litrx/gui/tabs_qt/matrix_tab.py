@@ -30,6 +30,7 @@ from ...matrix_analyzer import (
     save_results,
 )
 from ...i18n import get_i18n, t
+from ..dialogs_qt.ai_matrix_assistant_qt import AIMatrixAssistantDialog
 
 if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
@@ -70,6 +71,10 @@ class MatrixTab(QWidget):
         self.edit_dim_btn = QPushButton("✏️ 编辑维度 / Edit Dimensions")
         btn_layout.addWidget(self.edit_dim_btn)
 
+        self.ai_dims_btn = QPushButton("🤖 AI 生成维度 / AI Dims")
+        self.ai_dims_btn.clicked.connect(self._open_ai_dims)
+        btn_layout.addWidget(self.ai_dims_btn)
+
         self.import_config_btn = QPushButton("📥 导入配置 / Import Config")
         self.import_config_btn.clicked.connect(self._import_config)
         btn_layout.addWidget(self.import_config_btn)
@@ -77,6 +82,10 @@ class MatrixTab(QWidget):
         self.export_config_btn = QPushButton("📤 导出配置 / Export Config")
         self.export_config_btn.clicked.connect(self._export_config)
         btn_layout.addWidget(self.export_config_btn)
+
+        self.save_preset_btn = QPushButton("💾 另存为 Preset / Save as Preset")
+        self.save_preset_btn.clicked.connect(self._save_as_preset)
+        btn_layout.addWidget(self.save_preset_btn)
 
         self.reset_btn = QPushButton("🔄 重置默认 / Reset Default")
         self.reset_btn.clicked.connect(self._reset_config)
@@ -233,6 +242,37 @@ class MatrixTab(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._load_default_config()
+
+    def _save_as_preset(self) -> None:
+        """Save current config as a preset YAML file."""
+        # Suggest default directory and filename under configs/matrix
+        from ...resources import resource_path
+        from datetime import datetime
+        default_dir = resource_path('configs', 'matrix')
+        suggested = str(default_dir / f"preset_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yaml")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save as Preset",
+            suggested,
+            "YAML (*.yaml)"
+        )
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    yaml.safe_dump(self.matrix_config or {"dimensions": []}, f, allow_unicode=True, sort_keys=False)
+                QMessageBox.information(self, t("success") or "Success", t("saved") or "Saved")
+            except Exception as e:
+                QMessageBox.critical(self, t("error") or "Error", str(e))
+
+    def _open_ai_dims(self) -> None:
+        """Open AI assistant to generate dimensions and merge into current config."""
+        dlg = AIMatrixAssistantDialog(self, self.parent_window.build_config())
+        if dlg.exec() == dlg.Accepted and dlg.result:
+            dims = self.matrix_config.get('dimensions', []) or []
+            dims.extend(dlg.result)
+            self.matrix_config['dimensions'] = dims
+            dim_count = len(self.matrix_config.get("dimensions", []))
+            self.dim_count_label.setText(f"当前维度数：{dim_count} / Current Dimensions: {dim_count}")
 
     def _browse_folder(self) -> None:
         """Browse for PDF folder."""
