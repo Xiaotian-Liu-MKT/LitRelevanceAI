@@ -78,28 +78,47 @@ def load_mode_questions(mode: str) -> Dict[str, Any]:
     Returns:
         Dictionary with open_questions and yes_no_questions
     """
+    logger.info(f"Loading questions for mode: {mode}")
+
     # Try new unified config format
     unified_path = resource_path("configs", "abstract", f"{mode}.yaml")
+    logger.debug(f"Checking unified config path: {unified_path}")
     if unified_path.exists():
         try:
             with unified_path.open("r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
-                return {
+                result = {
                     "open_questions": data.get("open_questions", []),
                     "yes_no_questions": data.get("yes_no_questions", []),
                     "prompts": data.get("prompts", {}),
                     "settings": data.get("settings", {}),
                 }
+                logger.info(f"Loaded from unified config: {len(result['open_questions'])} open, {len(result['yes_no_questions'])} yes/no questions")
+                return result
         except Exception as e:
             logger.warning(f"警告: 加载统一配置失败: {e}")
 
     # Fall back to legacy format
     legacy_path = resource_path("questions_config.json")
+    logger.debug(f"Checking legacy config path: {legacy_path}")
     try:
+        if not legacy_path.exists():
+            logger.error(f"questions_config.json not found at: {legacy_path}")
+            return {"open_questions": [], "yes_no_questions": []}
+
         with legacy_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get(mode, {"open_questions": [], "yes_no_questions": []})
-    except Exception:
+
+        if mode not in data:
+            logger.error(f"Mode '{mode}' not found in questions_config.json. Available modes: {list(data.keys())}")
+            return {"open_questions": [], "yes_no_questions": []}
+
+        mode_data = data.get(mode, {"open_questions": [], "yes_no_questions": []})
+        logger.info(f"Loaded from legacy config: {len(mode_data.get('open_questions', []))} open, {len(mode_data.get('yes_no_questions', []))} yes/no questions")
+        return mode_data
+
+    except Exception as e:
+        logger.error(f"Failed to load questions config: {e}", exc_info=True)
         return {"open_questions": [], "yes_no_questions": []}
 
 

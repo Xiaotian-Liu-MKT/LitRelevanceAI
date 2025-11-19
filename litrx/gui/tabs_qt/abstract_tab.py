@@ -93,9 +93,26 @@ class AbstractScreeningWorker(QThread):
         """Run the screening process with concurrent processing (executed in background thread)."""
         try:
             # Load questions for selected mode
+            self.append_log.emit(f"加载筛选模式: {self.mode}")
             q = load_mode_questions(self.mode)
             open_q = q.get("open_questions", [])
             yes_no_q = q.get("yes_no_questions", [])
+
+            # Critical validation: Check if questions were loaded
+            if not open_q and not yes_no_q:
+                error_msg = (
+                    f"错误: 筛选模式 '{self.mode}' 没有配置任何问题！\n\n"
+                    f"请检查：\n"
+                    f"1. 在界面中点击 '编辑问题' 按钮添加问题\n"
+                    f"2. 或使用 'AI Assistant' 自动生成问题配置\n"
+                    f"3. 或在 questions_config.json 中手动配置"
+                )
+                self.show_error.emit("配置错误", error_msg)
+                self.append_log.emit(f"✗ 模式 '{self.mode}' 未配置问题")
+                return
+
+            self.append_log.emit(f"✓ 加载问题配置: {len(open_q)} 个开放问题, {len(yes_no_q)} 个是非问题")
+            self.append_log.emit(f"  预期生成 {(len(open_q) + len(yes_no_q)) * 2} 个结果列")
 
             # Load and validate data
             df, title_col, abstract_col = load_and_validate_data(self.file_path, self.config)
