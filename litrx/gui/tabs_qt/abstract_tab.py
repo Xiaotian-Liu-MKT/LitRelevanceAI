@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import threading
 from pathlib import Path
 import os
 from typing import TYPE_CHECKING, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -49,26 +48,127 @@ if TYPE_CHECKING:
     from ..base_window_qt import BaseWindow
 
 
+class AbstractScreeningWorker(QThread):
+    """Worker thread for abstract screening processing.
+
+    This QThread-based worker handles abstract screening in the background,
+    emitting signals for thread-safe UI updates.
+    """
+
+    # Signals for thread-safe communication with main thread
+    update_progress = pyqtSignal(float)  # progress percentage
+    update_status = pyqtSignal(str)  # status text
+    append_log = pyqtSignal(str)  # log text to append
+    add_result_row = pyqtSignal(int, str, str, str)  # row, title, status, summary
+    show_error = pyqtSignal(str, str)  # title, message
+    show_info = pyqtSignal(str, str)  # title, message
+    enable_export = pyqtSignal()
+    finished_processing = pyqtSignal()  # Emitted when done (success or cancelled)
+
+    def __init__(self, config: dict, file_path: str, mode: str, verify_enabled: bool):
+        """Initialize the worker.
+
+        Args:
+            config: Configuration dictionary
+            file_path: Path to input file (CSV or Excel)
+            mode: Screening mode name
+            verify_enabled: Whether verification is enabled
+        """
+        super().__init__()
+        self.config = config
+        self.file_path = file_path
+        self.mode = mode
+        self.verify_enabled = verify_enabled
+        self.stop_flag = False
+        self.df: Optional[pd.DataFrame] = None
+
+    def stop(self) -> None:
+        """Request the worker to stop processing."""
+        self.stop_flag = True
+
+    def run(self) -> None:
+        """Run the screening process (executed in background thread)."""
+        try:
+            # Load questions for selected mode
+            q = load_mode_questions(self.mode)
+            open_q = q.get("open_questions", [])
+            yes_no_q = q.get("yes_no_questions", [])
+
+            # Load and validate data
+            df, title_col, abstract_col = load_and_validate_data(self.file_path, self.config)
+            df = prepare_dataframe(df, open_q, yes_no_q)
+
+            self.df = df
+            total = len(df)
+
+            # Create screener
+            self.config["ENABLE_VERIFICATION"] = self.verify_enabled
+            screener = AbstractScreener(self.config)
+
+            # Process each row
+            for i, (idx, row) in enumerate(df.iterrows(), start=1):
+                if self.stop_flag:
+                    self.show_info.emit(t("hint"), t("task_stopped"))
+                    break
+
+                try:
+                    title = str(row.get('Title', ''))
+                    self.update_status.emit(f"Processing {i}/{total}: {title[:50]}...")
+                    self.append_log.emit(f"[{i}/{total}] {title[:50]}...")
+
+                    # Compute results (thread-safe; does not mutate df)
+                    results = screener.compute_single_article_results(
+                        row, title_col, abstract_col, open_q, yes_no_q
+                    )
+
+                    # Apply to DataFrame
+                    for col_name, value in results.get("columns", {}).items():
+                        df.at[idx, col_name] = value
+
+                    # Update table UI
+                    self.add_result_row.emit(i - 1, title, "Completed", "Analyzed")
+
+                except Exception as e:
+                    self.append_log.emit(f"Error: {str(e)}")
+                    self.add_result_row.emit(i - 1, title, "Error", str(e))
+
+                # Update progress
+                self.update_progress.emit(i / total * 100)
+
+            if not self.stop_flag:
+                # Auto-save results beside the input file using configured suffix
+                try:
+                    base, ext = os.path.splitext(self.file_path)
+                    suffix = self.config.get("OUTPUT_FILE_SUFFIX", "_analyzed")
+                    output_file_path = f"{base}{suffix}{ext}"
+                    if ext.lower() == ".csv":
+                        df.to_csv(output_file_path, index=False, encoding="utf-8-sig")
+                    else:
+                        df.to_excel(output_file_path, index=False)
+                    self.show_info.emit(t("success"), t("complete_saved", path=output_file_path))
+                except Exception as e:
+                    self.show_error.emit(t("error"), str(e))
+
+                self.enable_export.emit()
+
+        except Exception as e:
+            self.show_error.emit(t("error"), str(e))
+
+        finally:
+            self.finished_processing.emit()
+
+
 class AbstractTab(QWidget):
     """Tab for abstract screening."""
-
-    # Signals for thread-safe UI updates
-    update_progress_signal = pyqtSignal(float)
-    update_status_signal = pyqtSignal(str)
-    append_log_signal = pyqtSignal(str)
-    show_error_signal = pyqtSignal(str, str)
-    show_info_signal = pyqtSignal(str, str)
-    enable_export_signal = pyqtSignal()
-    restore_buttons_signal = pyqtSignal()
 
     def __init__(self, parent: BaseWindow) -> None:
         super().__init__()
         self.parent_window = parent
 
-        # Data
+        # Worker thread and data
+        self.worker: Optional[AbstractScreeningWorker] = None
         self.df: Optional[pd.DataFrame] = None
         self.mode_options = []
-        self.stop_flag = False
 
         # Main layout with splitter
         main_layout = QVBoxLayout(self)
@@ -212,15 +312,6 @@ class AbstractTab(QWidget):
 
         main_layout.addWidget(splitter)
 
-        # Connect signals
-        self.update_progress_signal.connect(self._update_progress)
-        self.update_status_signal.connect(self._update_status)
-        self.append_log_signal.connect(self._append_log)
-        self.show_error_signal.connect(self._show_error)
-        self.show_info_signal.connect(self._show_info)
-        self.enable_export_signal.connect(self._enable_export)
-        self.restore_buttons_signal.connect(self._restore_buttons)
-
         # Register for language change notifications
         get_i18n().add_observer(self.update_language)
 
@@ -263,7 +354,7 @@ class AbstractTab(QWidget):
             self.file_entry.setText(file_path)
 
     def start_screening(self) -> None:
-        """Start abstract screening."""
+        """Start abstract screening using QThread worker."""
         file_path = self.file_entry.text().strip()
         mode = self.mode_combo.currentText()
 
@@ -279,93 +370,45 @@ class AbstractTab(QWidget):
         self.progress_bar.setValue(0)
         self.log_text.clear()
         self.results_table.setRowCount(0)
-        self.stop_flag = False
 
-        # Start processing in background thread
-        threading.Thread(
-            target=self.process_screening,
-            args=(file_path, mode),
-            daemon=True
-        ).start()
+        # Create and configure worker thread
+        config = self.parent_window.build_config()
+        verify_enabled = self.verify_checkbox.isChecked()
+        self.worker = AbstractScreeningWorker(config, file_path, mode, verify_enabled)
+
+        # Connect worker signals to UI update slots
+        self.worker.update_progress.connect(self._update_progress)
+        self.worker.update_status.connect(self._update_status)
+        self.worker.append_log.connect(self._append_log)
+        self.worker.add_result_row.connect(self._add_result_row)
+        self.worker.show_error.connect(self._show_error)
+        self.worker.show_info.connect(self._show_info)
+        self.worker.enable_export.connect(self._enable_export)
+        self.worker.finished_processing.connect(self._on_worker_finished)
+
+        # Start the worker thread
+        self.worker.start()
 
     def stop_screening(self) -> None:
         """Stop the screening process."""
-        self.stop_flag = True
-        self.stop_btn.setEnabled(False)
-        self.append_log_signal.emit("Stopping...")
+        if self.worker:
+            self.worker.stop()
+            self.stop_btn.setEnabled(False)
+            self._append_log("Stopping...")
 
-    def process_screening(self, file_path: str, mode: str) -> None:
-        """Process abstract screening in background thread."""
-        config = self.parent_window.build_config()
+    def _on_worker_finished(self) -> None:
+        """Called when worker thread finishes (success or cancelled)."""
+        # Copy results from worker to main thread
+        if self.worker:
+            self.df = self.worker.df
 
-        try:
-            # Load questions for selected mode
-            q = load_mode_questions(mode)
-            open_q = q.get("open_questions", [])
-            yes_no_q = q.get("yes_no_questions", [])
+        # Restore button states
+        self._restore_buttons()
 
-            # Load and validate data
-            df, title_col, abstract_col = load_and_validate_data(file_path, config)
-            df = prepare_dataframe(df, open_q, yes_no_q)
-
-            self.df = df
-            total = len(df)
-
-            # Create screener
-            config["ENABLE_VERIFICATION"] = bool(self.verify_checkbox.isChecked())
-            screener = AbstractScreener(config)
-
-            # Process each row
-            for i, (idx, row) in enumerate(df.iterrows(), start=1):
-                if self.stop_flag:
-                    self.show_info_signal.emit(t("hint"), t("task_stopped"))
-                    break
-
-                try:
-                    title = str(row.get('Title', ''))
-                    self.update_status_signal.emit(f"Processing {i}/{total}: {title[:50]}...")
-                    self.append_log_signal.emit(f"[{i}/{total}] {title[:50]}...")
-
-                    # Compute results (thread-safe; does not mutate df)
-                    results = screener.compute_single_article_results(
-                        row, title_col, abstract_col, open_q, yes_no_q
-                    )
-
-                    # Apply to DataFrame
-                    for col_name, value in results.get("columns", {}).items():
-                        df.at[idx, col_name] = value
-
-                    # Update table UI
-                    self._add_result_row(i - 1, title, "Completed", "Analyzed")
-
-                except Exception as e:
-                    self.append_log_signal.emit(f"Error: {str(e)}")
-                    self._add_result_row(i - 1, title, "Error", str(e))
-
-                # Update progress
-                self.update_progress_signal.emit(i / total * 100)
-
-            if not self.stop_flag:
-                # Auto-save results beside the input file using configured suffix
-                try:
-                    base, ext = os.path.splitext(file_path)
-                    suffix = config.get("OUTPUT_FILE_SUFFIX", "_analyzed")
-                    output_file_path = f"{base}{suffix}{ext}"
-                    if ext.lower() == ".csv":
-                        df.to_csv(output_file_path, index=False, encoding="utf-8-sig")
-                    else:
-                        df.to_excel(output_file_path, index=False)
-                    self.show_info_signal.emit(t("success"), t("complete_saved", path=output_file_path))
-                except Exception as e:
-                    self.show_error_signal.emit(t("error"), str(e))
-
-                self.enable_export_signal.emit()
-
-        except Exception as e:
-            self.show_error_signal.emit(t("error"), str(e))
-
-        finally:
-            self.restore_buttons_signal.emit()
+        # Clean up worker reference
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
 
     def _add_result_row(self, row: int, title: str, status: str, summary: str) -> None:
         """Add a result row to the table (must be called from main thread via signal)."""
