@@ -251,12 +251,6 @@ class AIClient:
         if openai_version and openai_version < (1, 14, 0):
             message = (
                 f"OpenAI SDK {getattr(openai_module, '__version__', '<unknown>')} is too old. "
-        openai_version = AIClient._parse_version(getattr(openai_module, "__version__", ""))
-        httpx_version = AIClient._parse_version(getattr(httpx_module, "__version__", ""))
-
-        if openai_version and openai_version < (1, 14, 0):
-            message = (
-                f"OpenAI SDK {openai_module.__version__} is too old. "
                 "Install openai>=1.14.0 to continue."
             )
             logger.error(message)
@@ -266,7 +260,6 @@ class AIClient:
         if httpx_version and httpx_version < (0, 27, 0):
             message = (
                 f"httpx {getattr(httpx_module, '__version__', '<unknown>')} is too old. "
-                f"httpx {httpx_module.__version__} is too old. "
                 "Install httpx>=0.27,<0.28 to avoid transport issues."
             )
             logger.error(message)
@@ -277,7 +270,6 @@ class AIClient:
                 "Detected httpx %s (proxy keyword removed). Applying compatibility shim "
                 "so OpenAI SDK calls keep working. Please pin httpx>=0.27,<0.28 to avoid this fallback.",
                 getattr(httpx_module, "__version__", "<unknown>"),
-                httpx_module.__version__,
             )
             AIClient._ensure_httpx_proxy_shim(httpx_module)
 
@@ -327,10 +319,3 @@ class AIClient:
             httpx_module.AsyncClient.__init__ = patched_async_init  # type: ignore[assignment]
 
         httpx_module._litrx_proxy_shim_installed = True
-        if httpx_version and httpx_version >= (0, 28, 0):
-            message = (
-                f"httpx {httpx_module.__version__} is incompatible with older OpenAI SDKs. "
-                "Install httpx>=0.27,<0.28 to avoid the 'proxies' error."
-            )
-            logger.error(message)
-            raise RuntimeError(message)

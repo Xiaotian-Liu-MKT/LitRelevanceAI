@@ -25,5 +25,37 @@
         "column_name": "实证研究"
       }
     ]
+  },
+  "文献筛选模式": {
+    "description": "",
+    "yes_no_questions": [
+      {
+        "key": "has_experiment",
+        "question": "这篇文章里面是否做了实验？",
+        "column_name": "是否做了实验"
+      },
+      {
+        "key": "has_destination",
+        "question": "有没有关注destination？",
+        "column_name": "是否关注destination"
+      }
+    ],
+    "open_questions": [
+      {
+        "key": "destination_details",
+        "question": "具体关注了哪些destination（实验情境）？",
+        "column_name": "关注的destination"
+      },
+      {
+        "key": "result_variables",
+        "question": "具体的结果变量是什么？",
+        "column_name": "结果变量"
+      }
+    ]
+  },
+  "实验方法与目的地及结果变量抽取": {
+    "description": "",
+    "open_questions": [],
+    "yes_no_questions": []
   }
 }
