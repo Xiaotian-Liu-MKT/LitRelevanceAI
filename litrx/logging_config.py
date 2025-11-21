@@ -54,8 +54,18 @@ def _secure_exception_hook(exc_type, exc_value, exc_traceback):
         safe_traceback,
     )
 
-    # Call the default exception hook to ensure normal error handling
-    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    # Emit sanitized traceback to stderr instead of delegating to the default
+    # excepthook, which would print the original (potentially sensitive)
+    # message. This keeps secrets out of consoles while still surfacing the
+    # error context for debugging.
+    try:
+        sys.stderr.write(f"{exc_type.__name__}: {safe_message}\n")
+        sys.stderr.write(f"{safe_traceback}\n")
+        sys.stderr.flush()
+    except Exception:
+        # As a last resort fall back to the original hook, accepting that it
+        # may expose unsanitized content in extreme failure scenarios.
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 
 def setup_logging(
