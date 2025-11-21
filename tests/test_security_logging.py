@@ -73,6 +73,10 @@ class TestSecureLogger:
                 "Token: ***REDACTED***"
             ),
             (
+                "Token: Bearer abc.DEF+ghi/jkl=",
+                "Token: ***REDACTED***"
+            ),
+            (
                 "Using key sk-proj-abc123def456ghi789jkl012mno345pqr678stu",
                 "Using key ***REDACTED***"
             ),
