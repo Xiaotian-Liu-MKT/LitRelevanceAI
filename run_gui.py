@@ -12,6 +12,8 @@ import os
 import subprocess
 import sys
 
+from litrx.logging_config import get_default_logger
+
 DEPENDENCIES = {
     "pandas": "pandas",
     "openai": "openai",
@@ -38,6 +40,8 @@ def ensure_dependencies() -> None:
 
 def main() -> None:
     ensure_dependencies()
+    # Set up logging early so GUI exceptions are sanitized
+    get_default_logger()
     from litrx.gui.main_window_qt import launch_gui
 
     launch_gui()

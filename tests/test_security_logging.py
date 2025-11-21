@@ -1,17 +1,16 @@
-"""Test suite for secure logging functionality.
+"""Test suite for secure logging functionality and sanitization."""
 
-This test verifies that API keys and sensitive information are properly
-sanitized in logs and error messages.
-"""
-
+import importlib
 import logging
+import sys
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
 
 from litrx.security_utils import SecureLogger, safe_log_config, safe_log_error
-from litrx.logging_config import setup_logging
+from litrx.logging_config import setup_logging, _secure_exception_hook
 
 
 class TestSecureLogger:
@@ -70,6 +69,10 @@ class TestSecureLogger:
             ),
             (
                 "Token: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc",
+                "Token: ***REDACTED***"
+            ),
+            (
+                "Token: Bearer abc.DEF+ghi/jkl=",
                 "Token: ***REDACTED***"
             ),
             (
@@ -178,6 +181,63 @@ class TestLoggingIntegration:
             assert "***REDACTED***" in log_content
             # Verify full API key is NOT in log
             assert "sk-1234567890abcdefghijklmnopqrstuvwxyz" not in log_content
+
+    def test_exception_hook_sanitizes_stderr_output(self, capsys):
+        """The exception hook should not print raw secrets to stderr."""
+        from litrx.logging_config import _secure_exception_hook
+
+        try:
+            raise RuntimeError("API key sk-1234567890abcdefghijklmnopqrstuvwxyz is invalid")
+        except RuntimeError as e:
+            _secure_exception_hook(type(e), e, e.__traceback__)
+
+        captured = capsys.readouterr()
+        assert "***REDACTED***" in captured.err
+        assert "sk-1234567890abcdefghijklmnopqrstuvwxyz" not in captured.err
+
+
+def test_cli_installs_exception_hook(preserve_excepthook, mocker):
+    """CLI entry point should configure the sanitized exception hook."""
+
+    mocker.patch("litrx.cli._run_csv")
+
+    from litrx import cli
+
+    cli.main(["csv"])
+
+    assert sys.excepthook is _secure_exception_hook
+
+
+def test_run_gui_installs_exception_hook(preserve_excepthook, mocker):
+    """The run_gui script should also install the secure exception hook."""
+
+    project_root = Path(__file__).resolve().parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    gui_runner = importlib.import_module("run_gui")
+    gui_runner.ensure_dependencies = lambda: None
+
+    # Stub the GUI module to avoid importing PyQt during tests
+    original_gui_module = sys.modules.pop("litrx.gui", None)
+    original_main_window = sys.modules.pop("litrx.gui.main_window_qt", None)
+    try:
+        sys.modules["litrx.gui"] = types.SimpleNamespace()
+        sys.modules["litrx.gui.main_window_qt"] = types.SimpleNamespace(launch_gui=lambda: None)
+
+        gui_runner.main()
+
+        assert sys.excepthook is _secure_exception_hook
+    finally:
+        if original_gui_module is not None:
+            sys.modules["litrx.gui"] = original_gui_module
+        else:
+            sys.modules.pop("litrx.gui", None)
+
+        if original_main_window is not None:
+            sys.modules["litrx.gui.main_window_qt"] = original_main_window
+        else:
+            sys.modules.pop("litrx.gui.main_window_qt", None)
 
 
 class TestAIClientIntegration:

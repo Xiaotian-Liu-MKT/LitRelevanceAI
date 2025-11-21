@@ -4,6 +4,7 @@ Provides centralized logging setup with file and console handlers.
 """
 import logging
 import sys
+import traceback
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from typing import Optional
@@ -41,17 +42,30 @@ def _secure_exception_hook(exc_type, exc_value, exc_traceback):
     logger = logging.getLogger("litrx")
     SecureLogger = _get_secure_logger()
 
-    # Sanitize exception message
+    # Sanitize exception message and traceback to avoid leaking secrets
     safe_message = SecureLogger.sanitize_error(exc_value)
+    formatted_tb = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    safe_traceback = SecureLogger.sanitize_string(formatted_tb)
 
-    # Log sanitized exception
     logger.critical(
-        f"Uncaught exception: {exc_type.__name__}: {safe_message}",
-        exc_info=(exc_type, exc_value, exc_traceback)
+        "Uncaught exception: %s: %s\n%s",
+        exc_type.__name__,
+        safe_message,
+        safe_traceback,
     )
 
-    # Call the default exception hook to ensure normal error handling
-    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    # Emit sanitized traceback to stderr instead of delegating to the default
+    # excepthook, which would print the original (potentially sensitive)
+    # message. This keeps secrets out of consoles while still surfacing the
+    # error context for debugging.
+    try:
+        sys.stderr.write(f"{exc_type.__name__}: {safe_message}\n")
+        sys.stderr.write(f"{safe_traceback}\n")
+        sys.stderr.flush()
+    except Exception:
+        # As a last resort fall back to the original hook, accepting that it
+        # may expose unsanitized content in extreme failure scenarios.
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 
 def setup_logging(

@@ -174,15 +174,6 @@ class AbstractModeGenerator:
           questions: [ {type,key,question,column_name}... ]
         }
         """
-        # If already new schema, ensure required keys exist
-        if isinstance(data, dict) and ("criteria" in data or "questions" in data):
-            return {
-                "mode_name": data.get("mode_name") or data.get("mode_key") or "new_mode",
-                "description": data.get("description", ""),
-                "criteria": data.get("criteria", []) or [],
-                "questions": data.get("questions", []) or [],
-            }
-
         def map_items(items, default_type: str):
             mapped = []
             if isinstance(items, list):
@@ -196,12 +187,23 @@ class AbstractModeGenerator:
                         })
             return mapped
 
-        # Legacy mapping
+        # Normalize regardless of input schema to keep backward compatibility
+        mode_name = data.get("mode_name") or data.get("mode_key") or "new_mode"
+        description = data.get("description", "")
+        criteria = data.get("criteria") or map_items(data.get("yes_no_questions", []), "yes_no")
+        questions = data.get("questions") or map_items(data.get("open_questions", []), "text")
+
+        # Provide both new schema (mode_name/criteria/questions) and legacy
+        # keys (mode_key/yes_no_questions/open_questions) so callers and tests
+        # expecting either format can operate safely.
         return {
-            "mode_name": data.get("mode_name") or data.get("mode_key") or "new_mode",
-            "description": data.get("description", ""),
-            "criteria": map_items(data.get("yes_no_questions", []), "yes_no"),
-            "questions": map_items(data.get("open_questions", []), "text"),
+            "mode_name": mode_name,
+            "description": description,
+            "criteria": criteria,
+            "questions": questions,
+            "mode_key": mode_name,
+            "yes_no_questions": criteria,
+            "open_questions": questions,
         }
 
 
