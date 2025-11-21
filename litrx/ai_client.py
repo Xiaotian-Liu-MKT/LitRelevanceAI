@@ -36,6 +36,8 @@ class AIClient:
     """Initialize API credentials and send requests through OpenAI SDK."""
 
     def __init__(self, config: Dict[str, Any]) -> None:
+        self._validate_dependencies()
+
         service = config.get("AI_SERVICE", "openai")
         model = config.get("MODEL_NAME", "gpt-4o")
 
@@ -73,10 +75,21 @@ class AIClient:
         self._warned_temperature = False
 
         # Initialize OpenAI client (works for both OpenAI and SiliconFlow)
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=api_base if api_base else None
-        )
+        try:
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url=api_base if api_base else None
+            )
+        except TypeError as exc:
+            # Provide a clearer message for the common httpx/OpenAI mismatch
+            if "proxies" in str(exc):
+                guidance = (
+                    "Incompatible httpx/OpenAI versions detected (unsupported 'proxies' argument). "
+                    "Reinstall with `pip install -e .` to get openai>=1.14.0 and httpx>=0.27,<0.28."
+                )
+                logger.error(guidance)
+                raise RuntimeError(guidance) from exc
+            raise
         logger.info("AIClient initialized successfully")
 
     def request(self, messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
@@ -188,3 +201,110 @@ class AIClient:
         """Heuristic to determine temperature support for a model name."""
         name = (model_name or "").lower()
         return not (name.startswith("gpt-5") or name.startswith("o1") or name.startswith("o3") or name.startswith("o-"))
+
+    @staticmethod
+    def _parse_version(version_str: str) -> tuple[int, ...]:
+        """Extract numeric components from a version string."""
+
+        parts: List[int] = []
+        for segment in version_str.split("."):
+            number = ""
+            for char in segment:
+                if char.isdigit():
+                    number += char
+                else:
+                    break
+            if not number:
+                break
+            parts.append(int(number))
+        return tuple(parts)
+
+    @staticmethod
+    def _validate_dependencies() -> None:
+        """Validate OpenAI/httpx versions to prevent the 'proxies' TypeError."""
+
+        try:
+            import openai as openai_module
+            import httpx as httpx_module
+        except ImportError as exc:
+            message = (
+                "Required dependencies are missing. Reinstall with `pip install -e .` "
+                "to ensure compatible openai and httpx versions."
+            )
+            logger.error(message)
+            raise RuntimeError(message) from exc
+
+        openai_version = AIClient._parse_version(getattr(openai_module, "__version__", ""))
+        httpx_version = AIClient._parse_version(getattr(httpx_module, "__version__", ""))
+
+        if openai_version and openai_version < (1, 14, 0):
+            message = (
+                f"OpenAI SDK {openai_module.__version__} is too old. "
+                "Install openai>=1.14.0 to continue."
+            )
+            logger.error(message)
+            raise RuntimeError(message)
+
+        # Enforce lower bound while providing a compatibility shim for unexpected upgrades
+        if httpx_version and httpx_version < (0, 27, 0):
+            message = (
+                f"httpx {httpx_module.__version__} is too old. "
+                "Install httpx>=0.27,<0.28 to avoid transport issues."
+            )
+            logger.error(message)
+            raise RuntimeError(message)
+
+        if httpx_version and httpx_version >= (0, 28, 0):
+            logger.warning(
+                "Detected httpx %s (proxy keyword removed). Applying compatibility shim "
+                "so OpenAI SDK calls keep working. Please pin httpx>=0.27,<0.28 to avoid this fallback.",
+                httpx_module.__version__,
+            )
+            AIClient._ensure_httpx_proxy_shim(httpx_module)
+
+    @staticmethod
+    def _ensure_httpx_proxy_shim(httpx_module: Any) -> None:
+        """Add a thin shim so httpx>=0.28 accepts the deprecated ``proxies`` kwarg.
+
+        Newer httpx versions removed the ``proxies`` parameter, but OpenAI <1.52
+        still passes it. When users have unexpectedly upgraded httpx, we adapt the
+        keyword instead of crashing the GUI. The shim is idempotent and only runs
+        when required.
+        """
+
+        if getattr(httpx_module, "_litrx_proxy_shim_installed", False):
+            return
+
+        def _normalize_proxy(kwargs: Dict[str, Any]) -> None:
+            if "proxies" not in kwargs:
+                return
+            proxies = kwargs.pop("proxies")
+            if proxies is None:
+                return
+            if "proxy" in kwargs:
+                return
+            # httpx>=0.28 expects a single proxy value; choose a sensible default
+            if isinstance(proxies, dict):
+                if proxies:
+                    kwargs["proxy"] = next(iter(proxies.values()))
+            else:
+                kwargs["proxy"] = proxies
+
+        original_client_init = httpx_module.Client.__init__
+
+        def patched_client_init(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+            _normalize_proxy(kwargs)
+            return original_client_init(self, *args, **kwargs)
+
+        httpx_module.Client.__init__ = patched_client_init  # type: ignore[assignment]
+
+        if hasattr(httpx_module, "AsyncClient"):
+            original_async_init = httpx_module.AsyncClient.__init__
+
+            def patched_async_init(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+                _normalize_proxy(kwargs)
+                return original_async_init(self, *args, **kwargs)
+
+            httpx_module.AsyncClient.__init__ = patched_async_init  # type: ignore[assignment]
+
+        httpx_module._litrx_proxy_shim_installed = True

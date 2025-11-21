@@ -74,6 +74,8 @@ The issue occurs in `litrx/ai_client.py` when initializing the OpenAI client. Th
 Our fix ensures that:
 1. The OpenAI SDK is at least version 1.14.0 (which supports the new httpx API)
 2. httpx stays on the 0.27.x line (providing the still-supported `proxies` keyword)
+3. The AI client validates these versions at startup and raises a clear, actionable error if an incompatible combination is detected, instead of crashing with the raw `proxies` traceback.
+4. If an unexpected upgrade installs httpx 0.28+, LitRx now applies a small compatibility shim that rewrites the `proxies` keyword to the new `proxy` keyword so the GUI can still launch. A warning is logged so you can downgrade to the supported range.
 
 ## Related Files Modified
 
