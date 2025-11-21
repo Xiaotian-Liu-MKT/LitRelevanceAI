@@ -35,14 +35,14 @@ pip install -e .
 
 This will install:
 - `openai >= 1.14.0` (compatible with modern httpx)
-- `httpx >= 0.27.0` (with proper API support)
+- `httpx >= 0.27, < 0.28` (keeps the `proxies` keyword supported)
 
 ### Manual Fix (Alternative)
 
 If you prefer to manually control versions:
 
 ```bash
-pip install "openai>=1.14.0" "httpx>=0.27.0"
+pip install "openai>=1.14.0" "httpx>=0.27,<0.28"
 ```
 
 ### Verification
@@ -55,7 +55,7 @@ python -c "import openai; import httpx; print(f'OpenAI: {openai.__version__}, ht
 
 You should see:
 - OpenAI version 1.14.0 or higher
-- httpx version 0.27.0 or higher
+- httpx version 0.27.x (anything below 0.28)
 
 ### Testing the Fix
 
@@ -73,13 +73,13 @@ The issue occurs in `litrx/ai_client.py` when initializing the OpenAI client. Th
 
 Our fix ensures that:
 1. The OpenAI SDK is at least version 1.14.0 (which supports the new httpx API)
-2. httpx is at least version 0.27.0 (providing stable API)
+2. httpx stays on the 0.27.x line (providing the still-supported `proxies` keyword)
 
 ## Related Files Modified
 
 - `pyproject.toml`: Updated dependency version constraints
   - Added `openai>=1.14.0` constraint
-  - Added `httpx>=0.27.0` constraint
+  - Added `httpx>=0.27,<0.28` constraint
 
 ## If the Problem Persists
 

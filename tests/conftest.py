@@ -2,6 +2,7 @@
 
 import os
 import pytest
+from unittest.mock import patch
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -42,3 +43,27 @@ def mock_config():
         'TEMPERATURE': 0.3,
         'ENABLE_VERIFICATION': False,
     }
+
+
+@pytest.fixture
+def mocker():
+    """Lightweight substitute for pytest-mock's MockerFixture.
+
+    Provides a ``patch`` helper that auto-starts the patch and ensures it is
+    cleaned up after the test completes. This keeps tests using
+    ``mocker.patch`` working without requiring the external ``pytest-mock``
+    plugin.
+    """
+
+    active_patches = []
+
+    class _Mocker:
+        def patch(self, target, *args, **kwargs):
+            p = patch(target, *args, **kwargs)
+            active_patches.append(p)
+            return p.start()
+
+    yield _Mocker()
+
+    for p in reversed(active_patches):
+        p.stop()
