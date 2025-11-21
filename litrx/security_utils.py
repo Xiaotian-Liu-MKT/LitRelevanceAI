@@ -37,6 +37,7 @@ class SecureLogger:
         r'sk-(test|live)-[a-zA-Z0-9]{16,}',  # Environment-scoped keys
         r'[A-Fa-f0-9]{32,}',  # Generic hex tokens
         r'Bearer\s+[A-Za-z0-9._~+/=-]+',  # Bearer tokens (allow base64 + URL-safe chars)
+        r'Bearer\s+[A-Za-z0-9._\-]+',  # Bearer tokens
         r'eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+',  # JWT tokens
     ]
 
