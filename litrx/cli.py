@@ -1,6 +1,8 @@
 import argparse
 from typing import List, Optional
 
+from .logging_config import get_default_logger
+
 
 def _run_csv(_: argparse.Namespace) -> None:
     from . import csv_analyzer
@@ -28,6 +30,10 @@ def _run_matrix(_: argparse.Namespace) -> None:
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Entry point for the ``litrx`` command line interface."""
+    # Install logging and the sanitized exception hook as early as possible so
+    # secrets in uncaught errors don't leak before subcommands run.
+    get_default_logger()
+
     parser = argparse.ArgumentParser(prog="litrx", description="Literature analysis tools")
     subparsers = parser.add_subparsers(dest="command")
 

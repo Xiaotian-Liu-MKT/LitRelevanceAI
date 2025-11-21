@@ -1,6 +1,7 @@
 """Pytest configuration for LitRelevanceAI tests."""
 
 import os
+import sys
 import pytest
 from unittest.mock import patch
 
@@ -67,3 +68,12 @@ def mocker():
 
     for p in reversed(active_patches):
         p.stop()
+
+
+@pytest.fixture
+def preserve_excepthook():
+    """Preserve and restore ``sys.excepthook`` around a test."""
+
+    original_hook = sys.excepthook
+    yield
+    sys.excepthook = original_hook
