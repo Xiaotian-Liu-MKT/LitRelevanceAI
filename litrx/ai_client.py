@@ -223,6 +223,9 @@ class AIClient:
     def _validate_dependencies() -> None:
         """Validate OpenAI/httpx versions to prevent the 'proxies' TypeError."""
 
+        openai_version: tuple[int, ...] = ()
+        httpx_version: tuple[int, ...] = ()
+
         try:
             import openai as openai_module
             import httpx as httpx_module
@@ -234,6 +237,20 @@ class AIClient:
             logger.error(message)
             raise RuntimeError(message) from exc
 
+        try:
+            openai_version = AIClient._parse_version(getattr(openai_module, "__version__", ""))
+            httpx_version = AIClient._parse_version(getattr(httpx_module, "__version__", ""))
+        except Exception as exc:  # pragma: no cover - defensive guard for unexpected module state
+            message = (
+                "Unable to read dependency versions (openai/httpx). "
+                "Reinstall with `pip install -e .` to restore supported packages."
+            )
+            logger.error(message)
+            raise RuntimeError(message) from exc
+
+        if openai_version and openai_version < (1, 14, 0):
+            message = (
+                f"OpenAI SDK {getattr(openai_module, '__version__', '<unknown>')} is too old. "
         openai_version = AIClient._parse_version(getattr(openai_module, "__version__", ""))
         httpx_version = AIClient._parse_version(getattr(httpx_module, "__version__", ""))
 
@@ -248,6 +265,7 @@ class AIClient:
         # Enforce lower bound while providing a compatibility shim for unexpected upgrades
         if httpx_version and httpx_version < (0, 27, 0):
             message = (
+                f"httpx {getattr(httpx_module, '__version__', '<unknown>')} is too old. "
                 f"httpx {httpx_module.__version__} is too old. "
                 "Install httpx>=0.27,<0.28 to avoid transport issues."
             )
@@ -258,6 +276,7 @@ class AIClient:
             logger.warning(
                 "Detected httpx %s (proxy keyword removed). Applying compatibility shim "
                 "so OpenAI SDK calls keep working. Please pin httpx>=0.27,<0.28 to avoid this fallback.",
+                getattr(httpx_module, "__version__", "<unknown>"),
                 httpx_module.__version__,
             )
             AIClient._ensure_httpx_proxy_shim(httpx_module)
