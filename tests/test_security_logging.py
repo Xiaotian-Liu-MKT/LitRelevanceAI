@@ -179,6 +179,19 @@ class TestLoggingIntegration:
             # Verify full API key is NOT in log
             assert "sk-1234567890abcdefghijklmnopqrstuvwxyz" not in log_content
 
+    def test_exception_hook_sanitizes_stderr_output(self, capsys):
+        """The exception hook should not print raw secrets to stderr."""
+        from litrx.logging_config import _secure_exception_hook
+
+        try:
+            raise RuntimeError("API key sk-1234567890abcdefghijklmnopqrstuvwxyz is invalid")
+        except RuntimeError as e:
+            _secure_exception_hook(type(e), e, e.__traceback__)
+
+        captured = capsys.readouterr()
+        assert "***REDACTED***" in captured.err
+        assert "sk-1234567890abcdefghijklmnopqrstuvwxyz" not in captured.err
+
 
 class TestAIClientIntegration:
     """Test AIClient integration with SecureLogger."""
