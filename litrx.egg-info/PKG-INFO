@@ -6,7 +6,8 @@ Author: Unknown
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 Requires-Dist: pandas
-Requires-Dist: openai
+Requires-Dist: openai>=1.14.0
+Requires-Dist: httpx>=0.27.0
 Requires-Dist: tqdm
 Requires-Dist: openpyxl
 Requires-Dist: pyyaml

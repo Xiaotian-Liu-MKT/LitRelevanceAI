@@ -18,11 +18,13 @@ litrx/key_manager.py
 litrx/logging_config.py
 litrx/matrix_analyzer.py
 litrx/pdf_screener.py
+litrx/preset_manager.py
 litrx/progress_manager.py
 litrx/prompt_builder.py
 litrx/resources.py
 litrx/security_utils.py
 litrx/task_manager.py
+litrx/token_tracker.py
 litrx/utils.py
 litrx.egg-info/PKG-INFO
 litrx.egg-info/SOURCES.txt
