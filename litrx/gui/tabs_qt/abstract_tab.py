@@ -297,6 +297,10 @@ class AbstractTab(QWidget):
         self.add_mode_btn.clicked.connect(self.add_mode)
         mode_layout.addWidget(self.add_mode_btn)
 
+        self.delete_mode_btn = QPushButton(t("delete_mode"))
+        self.delete_mode_btn.clicked.connect(self.delete_mode)
+        mode_layout.addWidget(self.delete_mode_btn)
+
         self.edit_questions_btn = QPushButton(t("edit_questions"))
         self.edit_questions_btn.clicked.connect(self.edit_questions)
         mode_layout.addWidget(self.edit_questions_btn)
@@ -455,6 +459,7 @@ class AbstractTab(QWidget):
         self.browse_btn.setText(t("browse"))
         self.mode_label.setText(t("screening_mode_label"))
         self.add_mode_btn.setText(t("add_mode"))
+        self.delete_mode_btn.setText(t("delete_mode"))
         self.edit_questions_btn.setText(t("edit_questions"))
         self.ai_assist_btn.setText(t("ai_mode_assistant_title") or "AI Assistant")
         self.verify_checkbox.setText(t("enable_verification"))
@@ -672,6 +677,69 @@ class AbstractTab(QWidget):
             self.mode_combo.setCurrentIndex(idx)
 
         QMessageBox.information(self, t("success"), t("saved"))
+
+    def delete_mode(self) -> None:
+        """Delete the selected screening mode after confirmation."""
+        mode = self.mode_combo.currentText().strip()
+
+        # Check if a mode is selected
+        if not mode:
+            QMessageBox.warning(self, t("warning"), t("no_mode_selected"))
+            return
+
+        # Load current modes
+        q_path = self._questions_path()
+        try:
+            if q_path.exists():
+                with q_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                data = {}
+        except Exception as e:
+            QMessageBox.critical(self, t("error"), f"Failed to load modes: {str(e)}")
+            return
+
+        # Check if this is the last mode
+        if len(data) <= 1:
+            QMessageBox.warning(self, t("warning"), t("cannot_delete_last_mode"))
+            return
+
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self,
+            t("confirm"),
+            t("delete_mode_confirm", mode=mode),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Delete the mode
+        if mode in data:
+            del data[mode]
+
+            # Save updated config
+            try:
+                with q_path.open("w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                QMessageBox.critical(self, t("error"), f"Failed to save: {str(e)}")
+                return
+
+            # Refresh combo box
+            self._load_modes()
+            self.mode_combo.clear()
+            self.mode_combo.addItems(self.mode_options)
+
+            # Select first mode if available
+            if self.mode_options:
+                self.mode_combo.setCurrentIndex(0)
+
+            QMessageBox.information(self, t("success"), t("mode_deleted"))
+        else:
+            QMessageBox.warning(self, t("warning"), f"Mode '{mode}' not found in configuration")
 
     def edit_questions(self) -> None:
         """Open a simple Qt dialog to edit questions for the selected mode."""
