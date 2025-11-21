@@ -308,3 +308,10 @@ class AIClient:
             httpx_module.AsyncClient.__init__ = patched_async_init  # type: ignore[assignment]
 
         httpx_module._litrx_proxy_shim_installed = True
+        if httpx_version and httpx_version >= (0, 28, 0):
+            message = (
+                f"httpx {httpx_module.__version__} is incompatible with older OpenAI SDKs. "
+                "Install httpx>=0.27,<0.28 to avoid the 'proxies' error."
+            )
+            logger.error(message)
+            raise RuntimeError(message)
